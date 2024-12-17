@@ -1,16 +1,14 @@
-# -*- coding: utf-8 -*-
-
-# Sample Python code for youtube.channels.list
-# See instructions for running these code samples locally:
-# https://developers.google.com/explorer-help/code-samples#python
-
 import os
 
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 import googleapiclient.errors
+import pandas as pd
+from dotenv import load_dotenv
+
 
 scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
+load_dotenv()
 
 def main():
     # Disable OAuthlib's HTTPS verification when running locally.
@@ -19,22 +17,59 @@ def main():
 
     api_service_name = "youtube"
     api_version = "v3"
-    client_secrets_file = "client_secret_google.json"
 
-    # Get credentials and create an API client
-    flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(
-        client_secrets_file, scopes)
-    credentials = flow.run_console()
+    api_key= os.getenv("API_KEY")
     youtube = googleapiclient.discovery.build(
-        api_service_name, api_version, credentials=credentials)
-
-    request = youtube.channels().list(
-        part="snippet,contentDetails,statistics",
-        id="UC_x5XG1OV2P6uZZ5FSM9Ttw"
+        api_service_name, api_version, developerKey=api_key)
+    
+    playlistRequest = youtube.playlistItems().list(
+        part="snippet,contentDetails",
+        maxResults=100,
+        playlistId="UUOnECY8FBKKPVi5ZsSgXPJA"
     )
-    response = request.execute()
 
-    print(response)
+
+    playlist_results = playlistRequest.execute(); 
+
+    video_data = []
+    for video in playlist_results.get('items', []): 
+        title = video['snippet']['title']
+        video_id = video['contentDetails']['videoId']
+        print(f"Title: {title}\nVideo ID: {video_id}\n")
+        content_details = video['contentDetails']
+
+        date = content_details['videoPublishedAt']
+        # print("\n CD", content_details)
+        # print(video)
+        video_data.append({
+            "title": title,
+            "video_id": video_id,
+            "added_to_db": False,
+            "date": date
+        })
+
+    df = pd.DataFrame(video_data)
+    print(filter_videos(df))
+
+
+
+
+video_filter = { 
+    "MK8": ["MK8", "Mario Kart 8", "Mario Kart 8 Deluxe"],
+    "COD": ["COD", "Call of Duty", "Call of Duty Warzone", "Call of Duty Black Ops Cold War", "Call of Duty Black Ops 6", "Black Ops 6"],
+    "Rocket League": ["Rocket League", "RL"],
+}
+
+def filter_videos(videos): 
+    filtered_videos = []
+    for _, video in videos.iterrows():
+        for game, keywords in video_filter.items():
+            if any(keyword.lower() in video['title'].lower() for keyword in keywords):
+                video['game'] = game
+                filtered_videos.append(video)
+                break
+    return pd.DataFrame(filtered_videos)
+
 
 if __name__ == "__main__":
     main()
