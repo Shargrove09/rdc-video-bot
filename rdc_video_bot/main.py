@@ -5,6 +5,7 @@ import googleapiclient.discovery
 import googleapiclient.errors
 import pandas as pd
 from dotenv import load_dotenv
+import gspread
 
 
 scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
