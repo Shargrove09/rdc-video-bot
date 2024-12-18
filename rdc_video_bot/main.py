@@ -5,11 +5,51 @@ import googleapiclient.discovery
 import googleapiclient.errors
 import pandas as pd
 from dotenv import load_dotenv
-import gspread
-
+from sheet import set_video_sheet
+from datetime import datetime
 
 scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
+
 load_dotenv()
+
+def fetchVideosFromPlaylist(youtube, pageToken=None): 
+    # Fetch Playlist Results
+    if (youtube): 
+        playlistRequest = youtube.playlistItems().list(
+            part="snippet,contentDetails",
+            maxResults=50, # 50 is max limit set by youtube API 
+            playlistId="UUOnECY8FBKKPVi5ZsSgXPJA",
+            pageToken=pageToken
+        )
+        playlist_results = playlistRequest.execute(); 
+        global page_token
+        print(playlist_results) 
+        try: 
+            page_token = playlist_results['nextPageToken']
+        except: 
+            print("\n Couldn't find page token!")
+            page_token = ""
+        return playlist_results
+    else:  
+        print("Youtube Client not initialized!")
+
+def parseVideos(playlist_results, video_data_list): 
+    for video in playlist_results.get('items', []): 
+        title = video['snippet']['title']
+        video_id = video['contentDetails']['videoId']
+        print(f"Title: {title}\nVideo ID: {video_id}\n")
+        content_details = video['contentDetails']
+
+        date_str = content_details['videoPublishedAt']
+        date_obj = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
+        formatted_date = date_obj.strftime("%Y-%m-%d %H:%M:%S")
+
+        video_data_list.append({
+            "title": title,
+            "video_id": video_id,
+            "added_to_db": False,
+            "date": formatted_date
+        }) 
 
 def main():
     # Disable OAuthlib's HTTPS verification when running locally.
@@ -22,35 +62,21 @@ def main():
     api_key= os.getenv("API_KEY")
     youtube = googleapiclient.discovery.build(
         api_service_name, api_version, developerKey=api_key)
-    
-    playlistRequest = youtube.playlistItems().list(
-        part="snippet,contentDetails",
-        maxResults=100,
-        playlistId="UUOnECY8FBKKPVi5ZsSgXPJA"
-    )
-
-
-    playlist_results = playlistRequest.execute(); 
-
     video_data = []
-    for video in playlist_results.get('items', []): 
-        title = video['snippet']['title']
-        video_id = video['contentDetails']['videoId']
-        print(f"Title: {title}\nVideo ID: {video_id}\n")
-        content_details = video['contentDetails']
+    global page_token
+    page_token = ""
+    
+    for i in range(25): 
+        fetched_videos = fetchVideosFromPlaylist(youtube, page_token)
+        parseVideos(fetched_videos, video_data)
+        i += 1
 
-        date = content_details['videoPublishedAt']
-        # print("\n CD", content_details)
-        # print(video)
-        video_data.append({
-            "title": title,
-            "video_id": video_id,
-            "added_to_db": False,
-            "date": date
-        })
+
 
     df = pd.DataFrame(video_data)
-    print(filter_videos(df))
+    filtered_df = filter_videos(df)
+    print("--- \n Filtered DF \n --- \n", filtered_df)
+    set_video_sheet(filtered_df)
 
 
 
