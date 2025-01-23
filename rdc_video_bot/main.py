@@ -7,6 +7,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from sheet import set_video_sheet
 from datetime import datetime
+from rapidfuzz import fuzz, process
 
 scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
 
@@ -74,7 +75,7 @@ def main():
 
 
     df = pd.DataFrame(video_data)
-    filtered_df = filter_videos(df)
+    filtered_df = fuzzy_filter_videos(df)
     print("--- \n Filtered DF \n --- \n", filtered_df)
     set_video_sheet(filtered_df)
 
@@ -84,7 +85,7 @@ def main():
 video_filter = { 
     "MK8": ["MK8", "Mario Kart 8", "Mario Kart 8 Deluxe"],
     "COD": ["COD", "Call of Duty", "Call of Duty Warzone", "Call of Duty Black Ops Cold War", "Call of Duty Black Ops 6", "Black Ops 6"],
-    "Rocket League": ["Rocket League", "RL"],
+    "Rocket League": ["Rocket League",],
 }
 
 def filter_videos(videos): 
@@ -95,6 +96,30 @@ def filter_videos(videos):
                 video['game'] = game
                 filtered_videos.append(video)
                 break
+    return pd.DataFrame(filtered_videos)
+
+def fuzzy_filter_videos(videos, threshold=80):
+    filtered_videos = []
+    
+    for _, video in videos.iterrows():
+        title = video['title'].lower()
+        best_match = None
+        best_score = 0
+        
+        for game, keywords in video_filter.items():
+            # Check each keyword against the title
+            for keyword in keywords:
+                score = fuzz.partial_ratio(keyword.lower(), title)
+                if score > threshold and score > best_score:
+                    best_score = score
+                    best_match = game
+        
+        if best_match:
+            video['game'] = best_match
+            video['match_score'] = best_score
+            print(f'Found match: {best_match} with score: {best_score} for video: {title}')
+            filtered_videos.append(video)
+    
     return pd.DataFrame(filtered_videos)
 
 
