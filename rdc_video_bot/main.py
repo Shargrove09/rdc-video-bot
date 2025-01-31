@@ -11,21 +11,35 @@ scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 load_dotenv()
 
-def fetchVideosFromPlaylist(youtube, pageToken=None): 
+def fetchVideosFromPlaylist(youtube, pageToken=None, proccessed_videos = None): 
+    if proccessed_videos is None: 
+        proccessed_videos = set()
     # Fetch Playlist Results
     if (youtube): 
-        playlistRequest = youtube.playlistItems().list(
+        playlist_request = youtube.playlistItems().list(
             part="snippet,contentDetails",
-            maxResults=50, # 50 is max limit set by youtube API 
+            maxResults=50, # 50 is max limit set by YT API 
             playlistId="UUOnECY8FBKKPVi5ZsSgXPJA",
             pageToken=pageToken
         )
-        playlist_results = playlistRequest.execute(); 
+        playlist_results = playlist_request.execute(); 
         # TODO: Try to find a better way other than global 
-        global page_token
         print(playlist_results) 
+
+        print(f"Fetched {len(playlist_results.get('items', []))} videos")
+        print(f"Page Token: {pageToken}")
+
+        filtered_videos = []
+        for item in playlist_results.get('items', []):
+            video_id = item['contentDetails']['videoId']
+            if video_id not in proccessed_videos:
+                proccessed_videos.add(video_id)
+                filtered_videos.append(item)
+
+        playlist_results['items'] = filtered_videos
         try: 
-            page_token = playlist_results['nextPageToken']
+            global page_token
+            page_token = playlist_results.get('nextPageToken', "")
         except: 
             print("\n Couldn't find page token!")
             page_token = ""
@@ -33,7 +47,7 @@ def fetchVideosFromPlaylist(youtube, pageToken=None):
     else:  
         print("Youtube Client not initialized!")
 
-def parseVideos(playlist_results, video_data_list): 
+def parse_videos(playlist_results, video_data_list): 
     for video in playlist_results.get('items', []): 
         title = video['snippet']['title']
         video_id = video['contentDetails']['videoId']
@@ -47,9 +61,9 @@ def parseVideos(playlist_results, video_data_list):
         video_data_list.append({
             "title": title,
             "video_id": "https://www.youtube.com/watch?v=" + video_id,
-            "added_to_db": False,
             "date": formatted_date,
-            "date_added_to_db": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "added_to_db": False,
+            "date_added_to_db": None
         }) 
 
 def main():
@@ -69,7 +83,7 @@ def main():
     
     for i in range(25): 
         fetched_videos = fetchVideosFromPlaylist(youtube, page_token)
-        parseVideos(fetched_videos, video_data)
+        parse_videos(fetched_videos, video_data)
         i += 1
 
 
@@ -95,7 +109,21 @@ def testBedMain():
     youtube = googleapiclient.discovery.build(
         api_service_name, api_version, developerKey=api_key)
     video_data = []
-    update_video_sheet()
+    
+    global page_token
+    page_token = None
+    processed_videos = set()
+
+    for i in range(25): 
+        fetched_videos = fetchVideosFromPlaylist(youtube, page_token, processed_videos)
+        parse_videos(fetched_videos, video_data)
+        i += 1
+    
+    video_data.sort(key=lambda x: x['date'], reverse=True)
+    df = pd.DataFrame(video_data)
+    filtered_df = fuzzy_filter_videos(df)
+    print("--- \n Filtered DF \n --- \n", filtered_df)
+    update_video_sheet(filtered_df)
 
 def filter_videos(videos): 
     filtered_videos = []
@@ -138,4 +166,11 @@ def token_filter_videos(videos: pd.DataFrame, threshold=80):
 
 if __name__ == "__main__":
     # main()
-    testBedMain()
+    user_input = input("Would you like to run main or testbedmain? (m/t): ")
+    if user_input.lower() == 'm':
+        main()
+    elif user_input.lower() == 't':
+        testBedMain()
+    else:
+        print("Invalid input. Please enter 'm' for main or 't' for testbedmain.")
+        exit(1)
