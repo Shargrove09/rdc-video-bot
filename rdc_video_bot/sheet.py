@@ -5,6 +5,8 @@ import pandas as pd
 global spreadsheet_name
 spreadsheet_name = "Work Tracker"
 
+# TODO: Refactor to either remove this function or use it to set a new video sheet? 
+#TODO: Should password lock rewriting 1st (main) sheet?
 def set_video_sheet(fetched_video_frame): 
     gc = gspread.service_account()
 
