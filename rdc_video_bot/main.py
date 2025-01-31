@@ -1,11 +1,9 @@
 import os
-
-import google_auth_oauthlib.flow
 import googleapiclient.discovery
 import googleapiclient.errors
 import pandas as pd
 from dotenv import load_dotenv
-from sheet import set_video_sheet
+from sheet import set_video_sheet, update_video_sheet
 from datetime import datetime
 from rapidfuzz import fuzz, process
 
@@ -23,6 +21,7 @@ def fetchVideosFromPlaylist(youtube, pageToken=None):
             pageToken=pageToken
         )
         playlist_results = playlistRequest.execute(); 
+        # TODO: Try to find a better way other than global 
         global page_token
         print(playlist_results) 
         try: 
@@ -47,9 +46,10 @@ def parseVideos(playlist_results, video_data_list):
 
         video_data_list.append({
             "title": title,
-            "video_id": video_id,
+            "video_id": "https://www.youtube.com/watch?v=" + video_id,
             "added_to_db": False,
-            "date": formatted_date
+            "date": formatted_date,
+            "date_added_to_db": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }) 
 
 def main():
@@ -65,7 +65,7 @@ def main():
         api_service_name, api_version, developerKey=api_key)
     video_data = []
     global page_token
-    page_token = ""
+    page_token = None
     
     for i in range(25): 
         fetched_videos = fetchVideosFromPlaylist(youtube, page_token)
@@ -73,20 +73,29 @@ def main():
         i += 1
 
 
-
+    video_data.sort(key=lambda x: x['date'], reverse=True)
     df = pd.DataFrame(video_data)
-    filtered_df = fuzzy_filter_videos(df)
+    filtered_df = filter_videos(df)
     print("--- \n Filtered DF \n --- \n", filtered_df)
     set_video_sheet(filtered_df)
-
-
-
 
 video_filter = { 
     "MK8": ["MK8", "Mario Kart 8", "Mario Kart 8 Deluxe"],
     "COD": ["COD", "Call of Duty", "Call of Duty Warzone", "Call of Duty Black Ops Cold War", "Call of Duty Black Ops 6", "Black Ops 6"],
     "Rocket League": ["Rocket League",],
 }
+
+def testBedMain(): 
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
+    api_service_name = "youtube"
+    api_version = "v3"
+
+    api_key= os.getenv("API_KEY")
+    youtube = googleapiclient.discovery.build(
+        api_service_name, api_version, developerKey=api_key)
+    video_data = []
+    update_video_sheet()
 
 def filter_videos(videos): 
     filtered_videos = []
@@ -113,15 +122,20 @@ def fuzzy_filter_videos(videos, threshold=80):
                 if score > threshold and score > best_score:
                     best_score = score
                     best_match = game
+            print(f'Best Score for {title} : {best_score}')
         
         if best_match:
             video['game'] = best_match
-            video['match_score'] = best_score
             print(f'Found match: {best_match} with score: {best_score} for video: {title}')
             filtered_videos.append(video)
     
     return pd.DataFrame(filtered_videos)
 
+def token_filter_videos(videos: pd.DataFrame, threshold=80): 
+    for _, video in videos.iterrows(): 
+        title = video['title'].lower()
+
 
 if __name__ == "__main__":
-    main()
+    # main()
+    testBedMain()
