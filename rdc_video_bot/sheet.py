@@ -7,15 +7,23 @@ spreadsheet_name = "Work Tracker"
 
 # TODO: Refactor to either remove this function or use it to set a new video sheet? 
 #TODO: Should password lock rewriting 1st (main) sheet?
-def set_video_sheet(fetched_video_frame): 
+def set_new_video_sheet(fetched_video_frame): 
     gc = gspread.service_account()
+    while True:
+        sheet_num = input("Enter sheet number to rewrite (2 or higher): ")
+        try:
+            sheet_num = int(sheet_num)
+            if sheet_num > 1:
+                video_sheet = gc.open(spreadsheet_name).get_worksheet(sheet_num - 1)
+                break
+            else:
+                print("Sheet number must be greater than 1")
+        except ValueError:
+            print("Please enter a valid number")
 
-    video_sheet = gc.open(spreadsheet_name).sheet1
-
-    # current_df = get_as_dataframe(video_sheet);
     print("Video data:")
     for _, row in fetched_video_frame.iterrows():
-        print(row.to_string())
+        print(row.to_string()) 
     set_with_dataframe(video_sheet, fetched_video_frame)
 
 # Should update entire video sheet with new videos from RDC Live

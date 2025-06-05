@@ -23,7 +23,6 @@ def fetchVideosFromPlaylist(youtube, pageToken=None, proccessed_videos = None):
             pageToken=pageToken
         )
         playlist_results = playlist_request.execute(); 
-        # TODO: Try to find a better way other than global 
         print(playlist_results) 
 
         print(f"Fetched {len(playlist_results.get('items', []))} videos")
