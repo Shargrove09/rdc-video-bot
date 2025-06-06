@@ -7,7 +7,7 @@ spreadsheet_name = "Work Tracker"
 
 # TODO: Refactor to either remove this function or use it to set a new video sheet? 
 #TODO: Should password lock rewriting 1st (main) sheet?
-def set_new_video_sheet(fetched_video_frame): 
+def set_video_sheet(fetched_video_frame): 
     gc = gspread.service_account()
     while True:
         sheet_num = input("Enter sheet number to rewrite (2 or higher): ")
