@@ -1,9 +1,9 @@
 import gspread
 from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import pandas as pd
+from config import SPREADSHEET_NAME
 
-global spreadsheet_name
-spreadsheet_name = "Work Tracker"
+
 
 # TODO: Refactor to either remove this function or use it to set a new video sheet? 
 #TODO: Should password lock rewriting 1st (main) sheet?
@@ -14,7 +14,7 @@ def set_video_sheet(fetched_video_frame):
         try:
             sheet_num = int(sheet_num)
             if sheet_num > 1:
-                video_sheet = gc.open(spreadsheet_name).get_worksheet(sheet_num - 1)
+                video_sheet = gc.open(SPREADSHEET_NAME).get_worksheet(sheet_num - 1)
                 break
             else:
                 print("Sheet number must be greater than 1")
@@ -32,9 +32,9 @@ def update_video_sheet(fetched_video_frame):
     try: 
         gc = gspread.service_account()
 
-        current_sheet = gc.open(spreadsheet_name).sheet1
+        current_sheet = gc.open(SPREADSHEET_NAME).sheet1
         print("Current Sheet: ", current_sheet)
-            # Convert boolean column to Sheets checkbox format
+        # Convert boolean column to Sheets checkbox format
 
         current_df = get_as_dataframe(current_sheet)
         # Get current data and handle checkboxes

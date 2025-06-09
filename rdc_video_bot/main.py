@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from sheet import set_video_sheet, update_video_sheet
 from datetime import datetime
 from rapidfuzz import fuzz, process
+from config import VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
+
 
 scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
 
@@ -31,7 +33,7 @@ def fetchVideosFromPlaylist(youtube, pageToken=None, proccessed_videos=None, pub
         playlist_request = youtube.playlistItems().list(
             part="snippet,contentDetails",
             maxResults=50,  # 50 is max limit set by YT API
-            playlistId="UUOnECY8FBKKPVi5ZsSgXPJA",
+            playlistId=YOUTUBE_PLAYLIST_ID,  # Using imported constant
             pageToken=pageToken
         )
         playlist_response = playlist_request.execute()
@@ -99,33 +101,26 @@ def parse_videos(playlist_results, video_data_list):
         }) 
 
 
-video_filter = { 
-    "MK8": ["MK8", "Mario Kart 8", "Mario Kart 8 Deluxe"],
-    "COD": ["COD", "Call of Duty", "Call of Duty Warzone", "Call of Duty Black Ops Cold War", "Call of Duty Black Ops 6", "Black Ops 6"],
-    "Rocket League": ["Rocket League",],
-}
 
 def testBedMain(): 
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-    api_service_name = "youtube"
-    api_version = "v3"
-
-    api_key= os.getenv("API_KEY")
+    api_key = os.getenv("API_KEY")
     youtube = googleapiclient.discovery.build(
-        api_service_name, api_version, developerKey=api_key)
+        YOUTUBE_API_SERVICE_NAME,  # Using imported constant
+        YOUTUBE_API_VERSION,       # Using imported constant
+        developerKey=api_key)
     video_data = []
     
     current_page_token = None
     processed_videos_set = set()
 
-    # Define your target start date
-    published_after_filter_date = "2024-01-01" # Change as needed
+    # Define target start date
+    published_after_filter_date = DEFAULT_PUBLISHED_AFTER_DATE  # Using imported constant
 
-    MAX_PAGES_TO_FETCH = 25
     pages_fetched = 0
 
-    while pages_fetched < MAX_PAGES_TO_FETCH:
+    while pages_fetched < MAX_PAGES_TO_FETCH:  # Using imported constant
         print(f"Fetching page {pages_fetched + 1} for testBedMain with token: {current_page_token}")
         fetch_result = fetchVideosFromPlaylist(youtube,
                                                pageToken=current_page_token,
@@ -161,7 +156,7 @@ def testBedMain():
 def filter_videos(videos): 
     filtered_videos = []
     for _, video in videos.iterrows():
-        for game, keywords in video_filter.items():
+        for game, keywords in VIDEO_FILTER.items():
             if any(keyword.lower() in video['title'].lower() for keyword in keywords):
                 video['game'] = game
                 filtered_videos.append(video)
@@ -176,7 +171,7 @@ def fuzzy_filter_videos(videos, threshold=80):
         best_match = None
         best_score = 0
         
-        for game, keywords in video_filter.items():
+        for game, keywords in VIDEO_FILTER.items():
             # Check each keyword against the title
             for keyword in keywords:
                 score = fuzz.partial_ratio(keyword.lower(), title)
@@ -192,10 +187,34 @@ def fuzzy_filter_videos(videos, threshold=80):
     
     return pd.DataFrame(filtered_videos)
 
-def token_filter_videos(videos: pd.DataFrame, threshold=80): 
-    for _, video in videos.iterrows(): 
+def token_filter_videos(videos: pd.DataFrame, threshold=80):
+    filtered_videos = []
+    
+    for _, video in videos.iterrows():
         title = video['title'].lower()
-
+        title_tokens = set(title.split())  # Split into individual words
+        
+        best_match = None
+        best_score = 0
+        
+        for game, keywords in VIDEO_FILTER.items():
+            for keyword in keywords:
+                keyword_tokens = set(keyword.lower().split())
+                
+                # Calculate how many keyword tokens appear in title
+                matching_tokens = keyword_tokens.intersection(title_tokens)
+                match_ratio = len(matching_tokens) / len(keyword_tokens) * 100
+                print(f"Match ratio for '{keyword}' in '{title}': {match_ratio:.2f}%")
+                
+                if match_ratio >= threshold and match_ratio > best_score:
+                    best_score = match_ratio
+                    best_match = game
+        
+        if best_match:
+            video['game'] = best_match
+            filtered_videos.append(video)
+    
+    return pd.DataFrame(filtered_videos)
 
 if __name__ == "__main__":
     # main()
