@@ -11,9 +11,6 @@ scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 load_dotenv()
 
-# It's good practice to remove module-level global variables like 'page_token'
-# if they are being managed within function calls and returns.
-
 def fetchVideosFromPlaylist(youtube, pageToken=None, proccessed_videos=None, published_after_str=None):
     if proccessed_videos is None:
         proccessed_videos = set()
@@ -82,7 +79,6 @@ def fetchVideosFromPlaylist(youtube, pageToken=None, proccessed_videos=None, pub
     }
 
 def parse_videos(playlist_results, video_data_list): 
-    # Ensure this function correctly handles the new dictionary structure if it was relying on playlist_results directly
     # The 'items' key is still present in the dictionary returned by the modified fetchVideosFromPlaylist
     for video in playlist_results.get('items', []): 
         title = video['snippet']['title']
