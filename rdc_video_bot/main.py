@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from sheet import update_video_sheet
 from datetime import datetime
 from rapidfuzz import fuzz, process
+from colorama import Fore, Style, init as colorama_init # Import colorama
 from config import VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
 
 
@@ -176,35 +177,36 @@ def fuzzy_filter_videos(videos, threshold=80):
 
 def interactive_menu():
     """Displays an interactive menu to the user."""
+    colorama_init(autoreset=True)  # Initialize colorama
     while True:
-        print("\n--- RDC Video Bot Menu ---")
-        print("1. Fetch and update videos (current default behavior)")
-        print("2. Fetch stats from dashboard (Not Implemented Yet)")
-        print("3. Fetch videos from a specific date")
-        print("4. Exit")
+        print(f"\n{Fore.CYAN}--- RDC Video Bot Menu ---{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}1. Fetch and update videos (current default behavior){Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}2. Fetch stats from dashboard (Not Implemented Yet){Style.RESET_ALL}")
+        print(f"{Fore.GREEN}3. Fetch videos from a specific date{Style.RESET_ALL}")
+        print(f"{Fore.RED}4. Exit{Style.RESET_ALL}")
 
-        choice = input("Enter your choice (1-4): ")
+        choice = input(f"{Fore.BLUE}Enter your choice (1-4): {Style.RESET_ALL}")
 
         if choice == '1':
-            print("Running: Fetch and update videos...")
+            print(f"{Fore.GREEN}Running: Fetch and update videos...{Style.RESET_ALL}")
             testBedMain()
         elif choice == '2':
-            print("Fetching stats from dashboard... (Not Implemented Yet)")
-            # Placeholder for fetch_dashboard_stats()        elif choice == '3':
+            print(f"{Fore.YELLOW}Fetching stats from dashboard... (Not Implemented Yet){Style.RESET_ALL}")
+            # Placeholder for fetch_dashboard_stats()
         elif choice == '3':
-            date_input = input("Enter the date to fetch videos from (YYYY-MM-DD): ")
+            date_input = input(f"{Fore.BLUE}Enter the date to fetch videos from (YYYY-MM-DD): {Style.RESET_ALL}")
             try:
                 # Validate the date format
                 datetime.strptime(date_input, "%Y-%m-%d")
-                print(f"Fetching videos from {date_input}...")
+                print(f"{Fore.GREEN}Fetching videos from {date_input}...{Style.RESET_ALL}")
                 testBedMain(custom_date=date_input)
             except ValueError:
-                print("Invalid date format. Please use YYYY-MM-DD format (e.g. 2025-06-10)")
+                print(f"{Fore.RED}Invalid date format. Please use YYYY-MM-DD format (e.g. 2025-06-10){Style.RESET_ALL}")
         elif choice == '4':
-            print("Exiting.")
+            print(f"{Fore.RED}Exiting.{Style.RESET_ALL}")
             break
         else:
-            print("Invalid choice. Please try again.")
+            print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     interactive_menu()
