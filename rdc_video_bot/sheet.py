@@ -3,29 +3,28 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import pandas as pd
 from config import SPREADSHEET_NAME
 from datetime import datetime # Added import
-
-
+import traceback # Added for more detailed error logging
 
 # TODO: Refactor to either remove this function or use it to set a new video sheet? 
 #TODO: Should password lock rewriting 1st (main) sheet?
-def set_video_sheet(fetched_video_frame): 
-    gc = gspread.service_account()
-    while True:
-        sheet_num = input("Enter sheet number to rewrite (2 or higher): ")
-        try:
-            sheet_num = int(sheet_num)
-            if sheet_num > 1:
-                video_sheet = gc.open(SPREADSHEET_NAME).get_worksheet(sheet_num - 1)
-                break
-            else:
-                print("Sheet number must be greater than 1")
-        except ValueError:
-            print("Please enter a valid number")
+# def set_video_sheet(fetched_video_frame): 
+#     gc = gspread.service_account()
+#     while True:
+#         sheet_num = input("Enter sheet number to rewrite (2 or higher): ")
+#         try:
+#             sheet_num = int(sheet_num)
+#             if sheet_num > 1:
+#                 video_sheet = gc.open(SPREADSHEET_NAME).get_worksheet(sheet_num - 1)
+#                 break
+#             else:
+#                 print("Sheet number must be greater than 1")
+#         except ValueError:
+#             print("Please enter a valid number")
 
-    print("Video data:")
-    for _, row in fetched_video_frame.iterrows():
-        print(row.to_string()) 
-    set_with_dataframe(video_sheet, fetched_video_frame)
+#     print("Video data:")
+#     for _, row in fetched_video_frame.iterrows():
+#         print(row.to_string()) 
+#     set_with_dataframe(video_sheet, fetched_video_frame)
 
 def update_dashboard_sheet(gc, videos_df_original): # gc is gspread client, videos_df is the dataframe from main sheet
     try:
@@ -50,6 +49,7 @@ def update_dashboard_sheet(gc, videos_df_original): # gc is gspread client, vide
         oldest_video_date_str = "N/A"
         timespan_days = None
         unique_ids_count = None
+        game_counts = pd.Series(dtype=int) # For storing counts of each game
 
         if not videos_df.empty:
             # Remove any fully empty rows, then count the remaining rows
@@ -97,6 +97,18 @@ def update_dashboard_sheet(gc, videos_df_original): # gc is gspread client, vide
             else:
                 print("Warning (Dashboard): 'video_id' column missing in DataFrame.")
 
+            # Calculate game statistics
+            if 'games' in videos_df.columns and not videos_df['games'].isna().all():
+                all_games_list = []
+                # Split comma-separated games and count them
+                for games_str in videos_df['games'].dropna():
+                    all_games_list.extend([game.strip() for game in games_str.split(',')])
+                if all_games_list:
+                    game_counts = pd.Series(all_games_list).value_counts()
+            else:
+                print("Warning (Dashboard): 'games' column missing or empty in DataFrame.")
+
+
         # Prepare data for the dashboard sheet
         dashboard_data_list = [
             ("--- General Information ---", ""),
@@ -123,6 +135,13 @@ def update_dashboard_sheet(gc, videos_df_original): # gc is gspread client, vide
         if timespan_days is not None:
             dashboard_data_list.append(("Timespan of Videos (Days)", timespan_days))
         
+        # Add game statistics to dashboard data
+        if not game_counts.empty:
+            dashboard_data_list.append(("", "")) # Spacer
+            dashboard_data_list.append(("--- Game Statistics ---", ""))
+            for game, count in game_counts.items():
+                dashboard_data_list.append((f"Videos for {game}", count))
+        
         dashboard_df_to_write = pd.DataFrame(dashboard_data_list, columns=["Statistic", "Value"])
         
         # Clear the sheet and write the new dashboard data
@@ -138,63 +157,306 @@ def update_dashboard_sheet(gc, videos_df_original): # gc is gspread client, vide
     except Exception as e:
         print(f"An unexpected error occurred while updating dashboard sheet: {str(e)}")
 
+# Helper Functions for update_video_sheet
+
+def _setup_google_sheets_connection():
+    """Initializes gspread client and opens the main video sheet."""
+    gc = gspread.service_account()
+    spreadsheet = gc.open(SPREADSHEET_NAME)
+    current_sheet = spreadsheet.sheet1
+    print(f"--- Connecting to Sheet: '{current_sheet.title}' in Spreadsheet: '{SPREADSHEET_NAME}' ---")
+    return gc, current_sheet
+
+def _normalize_dataframe_columns(df, df_name="DataFrame"):
+    """Normalizes 'added_to_db' and 'date' columns in a DataFrame."""
+    if df is None or df.empty:
+        # print(f"Info ({df_name}): DataFrame is empty or None, skipping normalization.")
+        return pd.DataFrame() if df is None else df
+
+    # Normalize 'added_to_db'
+    if 'added_to_db' not in df.columns:
+        df['added_to_db'] = False
+        # print(f"Info ({df_name}): 'added_to_db' column added and set to False.")
+    else:
+        df['added_to_db'] = df['added_to_db'].astype(str).str.upper().map({
+            'TRUE': True, 'FALSE': False, True: True, False: False
+        }).fillna(False)
+
+    # Normalize 'date'
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        if df['date'].isna().any():
+            print(f"Warning ({df_name}): Some dates could not be parsed and were set to NaT.")
+    else:
+        print(f"Warning ({df_name}): 'date' column missing.")
+        
+    return df
+
+def _get_current_sheet_data(current_sheet):
+    """Fetches and prepares data from the current Google Sheet."""
+    current_df = get_as_dataframe(current_sheet, evaluate_formulas=True)
+    if current_df is None:
+        print("Info (Current Sheet): Sheet is truly empty, initializing as empty DataFrame.")
+        current_df = pd.DataFrame()
+    elif not current_df.empty:
+        current_df = current_df.dropna(how='all').reset_index(drop=True)
+        
+    return _normalize_dataframe_columns(current_df, "Current Sheet Data")
+
+def _prepare_fetched_data(fetched_video_frame):
+    """Prepares the newly fetched video DataFrame."""
+    if fetched_video_frame is None:
+        print("Warning (Fetched Data): fetched_video_frame is None. Returning empty DataFrame.")
+        return pd.DataFrame()
+    fetched_df = fetched_video_frame.copy()
+    return _normalize_dataframe_columns(fetched_df, "Fetched Video Data")
+
+def _merge_video_dataframes(current_df, fetched_df):
+    """Merges current and fetched video data, identifying new videos."""
+    new_videos_df = pd.DataFrame()
+
+    if fetched_df.empty:
+        print("Info (Merge): Fetched data is empty. No new videos to process.")
+        return current_df.copy(), new_videos_df
+
+    if current_df.empty:
+        print("Info (Merge): Current sheet is empty. Adding all fetched videos as new.")
+        updated_df = fetched_df.copy()
+        new_videos_df = fetched_df.copy()
+    else:
+        if 'video_id' not in current_df.columns:
+            print("Warning (Merge): 'video_id' column missing in the current sheet. Appending all fetched videos.")
+            new_videos_df = fetched_df.copy()
+            updated_df = pd.concat([current_df, new_videos_df], ignore_index=True)
+        elif 'video_id' not in fetched_df.columns:
+            print("Warning (Merge): 'video_id' column missing in fetched videos. No new videos can be added.")
+            updated_df = current_df.copy() # No changes
+        else:
+            # Ensure video_id types are consistent for comparison
+            current_df['video_id'] = current_df['video_id'].astype(str)
+            fetched_df['video_id'] = fetched_df['video_id'].astype(str)
+
+            new_videos_df = fetched_df[
+                ~fetched_df['video_id'].isin(current_df['video_id'])
+            ].copy()
+
+            if not new_videos_df.empty:
+                print(f"Info (Merge): Found {len(new_videos_df)} new videos to add.")
+                updated_df = pd.concat([current_df, new_videos_df], ignore_index=True)
+            else:
+                print("Info (Merge): No new unique videos found.")
+                updated_df = current_df.copy()
+                
+    return updated_df, new_videos_df
+
+def _finalize_updated_dataframe(updated_df):
+    """Finalizes the updated DataFrame (sorting, 'added_to_db' string conversion)."""
+    if updated_df.empty:
+        return updated_df
+
+    # Final processing for 'added_to_db' before writing to sheet
+    if 'added_to_db' not in updated_df.columns:
+         updated_df['added_to_db'] = False # Safeguard
+    
+    updated_df['added_to_db'] = updated_df['added_to_db'].map({
+        True: 'TRUE', False: 'FALSE'
+    }).fillna('FALSE')
+
+    # Sort DataFrame by date (descending), handling potential NaT values
+    if 'date' in updated_df.columns:
+        # Ensure it's datetime before sorting, though _normalize_dataframe_columns should handle this
+        updated_df['date'] = pd.to_datetime(updated_df['date'], errors='coerce') 
+        updated_df = updated_df.sort_values(by='date', ascending=False, na_position='last').reset_index(drop=True)
+        # Optional: Convert date to string for sheet appearance
+        # updated_df['date'] = updated_df['date'].dt.strftime('%Y-%m-%d %H:%M:%S').fillna('N/A')
+    else:
+        print("Warning (Finalize): 'date' column not found for sorting.")
+        
+    return updated_df
+
+def _write_df_to_sheet_and_update_dashboard(current_sheet, updated_df, new_videos_count, gc_client):
+    """Writes the DataFrame to the sheet and updates the dashboard."""
+    if updated_df.empty and new_videos_count == 0: # Check new_videos_count as well
+        print("Info (Write): Updated DataFrame is empty and no new videos. Sheet will not be cleared or updated.")
+    else:
+        print(f"Updating sheet with {len(updated_df)} total videos ({new_videos_count} new).")
+        current_sheet.clear()
+        set_with_dataframe(current_sheet, updated_df, include_index=False, resize=True)
+        print("Main sheet updated successfully.")
+
+    print("Attempting to update dashboard sheet...")
+    update_dashboard_sheet(gc_client, updated_df.copy()) # Pass a copy
+
+def _offer_dataframe_info(df, df_name="Updated Sheet Data"):
+    """Optionally prints detailed DataFrame information based on user input."""
+    user_input = input(f"Would you like to see the {df_name} information? (y/n): ")
+    if user_input.lower() == 'y':
+        print_dataframe_info(df, df_name)
+
+def _handle_update_video_sheet_errors(e):
+    """Handles errors for the update_video_sheet function."""
+    if isinstance(e, gspread.exceptions.SpreadsheetNotFound):
+        print(f"Error: Spreadsheet '{SPREADSHEET_NAME}' not found. Please check the name and permissions.")
+    elif isinstance(e, gspread.exceptions.APIError):
+        print(f"Google Sheets API Error: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None and hasattr(e.response, 'status_code') and e.response.status_code == 429:
+            print("This might be due to Google Sheets API rate limits. Consider adding delays or batching updates if frequent.")
+    else:
+        print(f"An unexpected error occurred in update_video_sheet: {str(e)}")
+        print(traceback.format_exc())
+
+# Main refactored function
+def update_video_sheet(fetched_video_frame, show_detailed_info=False):
+    """
+    Updates the main video sheet with new videos from fetched_video_frame.
+    It preserves existing video data and their 'added_to_db' status,
+    and appends new, unique videos. The sheet is sorted by date descending.
+
+    Args:
+        fetched_video_frame (pd.DataFrame): DataFrame containing newly fetched videos.
+                                            Expected to have 'video_id' and other relevant columns.
+        show_detailed_info (bool): If True, prompts to display detailed DataFrame info.
+    """
+    try:
+        gc, current_sheet = _setup_google_sheets_connection()
+
+        current_df = _get_current_sheet_data(current_sheet)
+        fetched_df = _prepare_fetched_data(fetched_video_frame)
+        
+        updated_df, new_videos_df = _merge_video_dataframes(current_df, fetched_df)
+        
+        final_updated_df = _finalize_updated_dataframe(updated_df)
+        
+        _write_df_to_sheet_and_update_dashboard(current_sheet, final_updated_df, len(new_videos_df), gc)
+
+        if show_detailed_info:
+            _offer_dataframe_info(final_updated_df)
+
+    except Exception as e:
+        _handle_update_video_sheet_errors(e)
+        
 # Should update entire video sheet with new videos from RDC Live
 # Shouldnt erase completed status of videos or any data 
-def update_video_sheet(fetched_video_frame): 
-    try: 
-        gc = gspread.service_account()
-
-        current_sheet = gc.open(SPREADSHEET_NAME).sheet1
-        print("Current Sheet: ", current_sheet)
-        # Convert boolean column to Sheets checkbox format
-
-        current_df = get_as_dataframe(current_sheet)
-        # Get current data and handle checkboxes
-        current_df['added_to_db'] = current_df['added_to_db'].map({
-            'TRUE': True,
-            'FALSE': False,
-            True: True,
-            False: False
-        })
-            # Check if sheet is empty
-        if current_df.empty or current_df.isna().all().all():
-            print("Sheet is empty. Adding all videos as new.")
-            updated_df = fetched_video_frame
-            new_videos = fetched_video_frame
-
-        else: 
-
-            current_df = current_df.dropna(how='all')
-            current_df['date'] = pd.to_datetime(current_df['date'])
-
-            latest_date = current_df['date'].max()
-            print("Latest Video Date: ", latest_date)
-
-            if not current_df.empty:
-                new_videos = fetched_video_frame[~fetched_video_frame['video_id'].isin(current_df['video_id'])]
-                updated_df = pd.concat([current_df, new_videos], ignore_index=True)
-            else: 
-                updated_df = fetched_video_frame
-        updated_df['added_to_db'] = updated_df['added_to_db'].map({
-            True: 'TRUE',
-            False: 'FALSE'
-    })
-        print(f"Adding {len(new_videos)} new videos")
-        set_with_dataframe(current_sheet, updated_df)
-
-        # Update dashboard sheet
-        print("Attempting to update dashboard sheet...")
-        update_dashboard_sheet(gc, updated_df) # Pass the gspread client and the updated DataFrame
-
-        user_input = input("Would you like to see the dataframe (current_sheet) information? (y/n): ")
-        if user_input.lower() == 'y':
-            print_dataframe_info(current_df, "Current Sheet")
-
-    except gspread.exceptions.SpreadsheetNotFound as e:
-        print(f"Error: Spreadsheet not found. Please check the name and permissions")
-    except Exception as e:
-        print(f"Error: {str(e)}")
-
+# def update_video_sheet(fetched_video_frame): # OLD FUNCTION - COMMENTED OUT / TO BE REPLACED
+#     """
+#     Updates the main video sheet with new videos from fetched_video_frame.
+#     It preserves existing video data and their 'added_to_db' status,
+#     and appends new, unique videos. The sheet is sorted by date descending.
+# 
+#     Args:
+#         fetched_video_frame (pd.DataFrame): DataFrame containing newly fetched videos.
+#                                             Expected to have 'video_id' and other relevant columns.
+#     """
+#     try:
+#         gc = gspread.service_account()
+#         spreadsheet = gc.open(SPREADSHEET_NAME)
+#         current_sheet = spreadsheet.sheet1
+#         print(f"--- Updating Sheet: '{current_sheet.title}' in Spreadsheet: '{SPREADSHEET_NAME}' ---")
+# 
+#         # Ensure fetched_video_frame is a copy to avoid modifying the original
+#         fetched_video_frame = fetched_video_frame.copy()
+# 
+#         # Ensure fetched_video_frame has 'added_to_db' column, defaulting to False for new videos
+#         if 'added_to_db' not in fetched_video_frame.columns:
+#             fetched_video_frame['added_to_db'] = False
+#         else:
+#             # Normalize to boolean if it exists, in case it's string 'True'/'False'
+#             fetched_video_frame['added_to_db'] = fetched_video_frame['added_to_db'].astype(str).str.upper().map({
+#                 'TRUE': True, 'FALSE': False, True: True, False: False
+#             }).fillna(False)
+# 
+# 
+#         # Ensure 'date' in fetched_video_frame is datetime if present, for consistent processing
+#         if 'date' in fetched_video_frame.columns:
+#             fetched_video_frame['date'] = pd.to_datetime(fetched_video_frame['date'], errors='coerce')
+# 
+#         current_df = get_as_dataframe(current_sheet, evaluate_formulas=True)
+#         if current_df is None: # Handles case where get_as_dataframe returns None for a truly empty sheet
+#             current_df = pd.DataFrame()
+# 
+#         # Normalize 'added_to_db' in current_df to boolean for consistent processing
+#         if not current_df.empty:
+#             current_df = current_df.dropna(how='all').reset_index(drop=True) # Clean before processing
+#             if 'added_to_db' in current_df.columns:
+#                 current_df['added_to_db'] = current_df['added_to_db'].astype(str).str.upper().map({
+#                     'TRUE': True, 'FALSE': False, True: True, False: False
+#                 }).fillna(False) # Default to False if missing or unparseable
+#             else:
+#                 current_df['added_to_db'] = False # Add column if missing
+# 
+#             if 'date' in current_df.columns:
+#                 current_df['date'] = pd.to_datetime(current_df['date'], errors='coerce')
+#         
+#         new_videos_df = pd.DataFrame()
+# 
+#         if current_df.empty:
+#             print("Sheet is empty. Adding all fetched videos as new.")
+#             updated_df = fetched_video_frame.copy() # 'added_to_db' is already boolean False
+#             new_videos_df = fetched_video_frame.copy()
+#         else:
+#             # Ensure 'video_id' column exists for comparison
+#             if 'video_id' not in current_df.columns:
+#                 print("Warning: 'video_id' column missing in the current sheet. Appending all fetched videos.")
+#                 new_videos_df = fetched_video_frame.copy()
+#                 updated_df = pd.concat([current_df, new_videos_df], ignore_index=True)
+#             elif 'video_id' not in fetched_video_frame.columns:
+#                 print("Warning: 'video_id' column missing in fetched videos. No new videos can be added.")
+#                 updated_df = current_df.copy() # No changes
+#             else:
+#                 # Ensure video_id types are consistent for comparison
+#                 current_df['video_id'] = current_df['video_id'].astype(str)
+#                 fetched_video_frame['video_id'] = fetched_video_frame['video_id'].astype(str)
+# 
+#                 new_videos_df = fetched_video_frame[
+#                     ~fetched_video_frame['video_id'].isin(current_df['video_id'])
+#                 ].copy() # 'added_to_db' is already boolean False
+# 
+#                 if not new_videos_df.empty:
+#                     print(f"Found {len(new_videos_df)} new videos to add.")
+#                     updated_df = pd.concat([current_df, new_videos_df], ignore_index=True)
+#                 else:
+#                     print("No new unique videos found.")
+#                     updated_df = current_df.copy()
+#         
+#         # Final processing for 'added_to_db' before writing to sheet
+#         if 'added_to_db' not in updated_df.columns:
+#              updated_df['added_to_db'] = False # Safeguard, should be present
+#         
+#         updated_df['added_to_db'] = updated_df['added_to_db'].map({
+#             True: 'TRUE', False: 'FALSE'
+#         }).fillna('FALSE')
+# 
+#         # Sort DataFrame by date (descending), handling potential NaT values
+#         if 'date' in updated_df.columns:
+#             updated_df['date'] = pd.to_datetime(updated_df['date'], errors='coerce')
+#             updated_df = updated_df.sort_values(by='date', ascending=False, na_position='last').reset_index(drop=True)
+#             # Convert date to string for consistent sheet appearance (optional, gspread_dataframe can handle datetime)
+#             # updated_df['date'] = updated_df['date'].dt.strftime('%Y-%m-%d %H:%M:%S').fillna('N/A')
+# 
+# 
+#         print(f"Updating sheet with {len(updated_df)} total videos ({len(new_videos_df)} new).")
+#         current_sheet.clear() # Clear sheet before writing to ensure clean update
+#         set_with_dataframe(current_sheet, updated_df, include_index=False, resize=True)
+#         print("Main sheet updated successfully.")
+# 
+#         print("Attempting to update dashboard sheet...")
+#         update_dashboard_sheet(gc, updated_df.copy()) # Pass a copy to dashboard
+# 
+#         user_input = input("Would you like to see the updated dataframe information? (y/n): ")
+#         if user_input.lower() == 'y':
+#             print_dataframe_info(updated_df, "Updated Sheet Data")
+# 
+#     except gspread.exceptions.SpreadsheetNotFound:
+#         print(f"Error: Spreadsheet '{SPREADSHEET_NAME}' not found. Please check the name and permissions.")
+#     except gspread.exceptions.APIError as e:
+#         print(f"Google Sheets API Error: {str(e)}")
+#         if hasattr(e, 'response') and e.response is not None and hasattr(e.response, 'status_code') and e.response.status_code == 429:
+#             print("This might be due to Google Sheets API rate limits. Consider adding delays or batching updates if frequent.")
+#     except Exception as e:
+#         import traceback
+#         print(f"An unexpected error occurred in update_video_sheet: {str(e)}")
+#         print(traceback.format_exc())
+        
 """Prints detailed information about a DataFrame including shape, columns, data types, first few rows, missing values, unique values per column, and basic statistics."""
 def print_dataframe_info(df, name="DataFrame"):
     print(f"\n=== {name} Information ===")

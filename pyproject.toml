@@ -14,6 +14,7 @@ python-dotenv = "^1.0.0"
 gspread = "^5.0.0"
 gspread-dataframe = "^3.0.0"
 rapidfuzz = "^3.0.0"
+colorama = "^0.4.6"
 
 [build-system]
 requires = ["poetry-core"]

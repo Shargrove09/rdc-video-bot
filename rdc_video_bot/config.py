@@ -13,6 +13,7 @@ SPREADSHEET_NAME = "Project RDC Video Tracker"
 
 VIDEO_FILTER = {
     "MK8": ["MK8", "Mario Kart 8", "Mario Kart 8 Deluxe"],
+    "MK World": ["MK World", "Mario Kart World"],
     "COD": [
         "COD", 
         "Call of Duty", 
@@ -21,6 +22,7 @@ VIDEO_FILTER = {
         "Black Ops 6",
     ],
     "Rocket League": ["Rocket League"],
+
 }
 
 def get_games():

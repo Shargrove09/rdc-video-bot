@@ -2,3 +2,4 @@
 client_secret_google.json
 /rdc_video_bot/__pycache__/
 /rdc_video_bot/*.pyc
+/logs/

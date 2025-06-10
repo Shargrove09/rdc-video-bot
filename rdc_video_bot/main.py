@@ -3,7 +3,7 @@ import googleapiclient.discovery
 import googleapiclient.errors
 import pandas as pd
 from dotenv import load_dotenv
-from sheet import set_video_sheet, update_video_sheet
+from sheet import update_video_sheet
 from datetime import datetime
 from rapidfuzz import fuzz, process
 from config import VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
@@ -102,7 +102,7 @@ def parse_videos(playlist_results, video_data_list):
 
 
 
-def testBedMain(): 
+def testBedMain(custom_date=None): 
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
     api_key = os.getenv("API_KEY")
@@ -116,7 +116,7 @@ def testBedMain():
     processed_videos_set = set()
 
     # Define target start date
-    published_after_filter_date = DEFAULT_PUBLISHED_AFTER_DATE
+    published_after_filter_date = custom_date if custom_date else DEFAULT_PUBLISHED_AFTER_DATE
     pages_fetched = 0
 
     while pages_fetched < MAX_PAGES_TO_FETCH: 
@@ -157,21 +157,18 @@ def fuzzy_filter_videos(videos, threshold=80):
     
     for _, video in videos.iterrows():
         title = video['title'].lower()
-        best_match = None
-        best_score = 0
+        matched_games = set()
         
         for game, keywords in VIDEO_FILTER.items():
-            # Check each keyword against the title
             for keyword in keywords:
                 score = fuzz.partial_ratio(keyword.lower(), title)
-                if score > threshold and score > best_score:
-                    best_score = score
-                    best_match = game
-            print(f'Best Score for {title} : {best_score}')
+                if score > threshold:
+                    matched_games.add(game)
+        print(f'Matched games for {title}: {matched_games}')
         
-        if best_match:
-            video['game'] = best_match
-            print(f'Found match: {best_match} with score: {best_score} for video: {title}')
+        if matched_games:
+            video = video.copy()  # Avoid SettingWithCopyWarning
+            video['games'] = ', '.join(sorted(matched_games))
             filtered_videos.append(video)
     
     return pd.DataFrame(filtered_videos)
@@ -183,7 +180,7 @@ def interactive_menu():
         print("\n--- RDC Video Bot Menu ---")
         print("1. Fetch and update videos (current default behavior)")
         print("2. Fetch stats from dashboard (Not Implemented Yet)")
-        print("3. Fetch videos from a specific date (Not Implemented Yet)")
+        print("3. Fetch videos from a specific date")
         print("4. Exit")
 
         choice = input("Enter your choice (1-4): ")
@@ -193,13 +190,16 @@ def interactive_menu():
             testBedMain()
         elif choice == '2':
             print("Fetching stats from dashboard... (Not Implemented Yet)")
-            # Placeholder for fetch_dashboard_stats()
+            # Placeholder for fetch_dashboard_stats()        elif choice == '3':
         elif choice == '3':
             date_input = input("Enter the date to fetch videos from (YYYY-MM-DD): ")
-            print(f"Fetching videos from {date_input}... (Not Implemented Yet)")
-            # Placeholder for fetching videos from a specific date
-            # You could call testBedMain with a date parameter: testBedMain(published_after_filter_date=date_input)
-            # Ensure testBedMain is modified to accept this parameter.
+            try:
+                # Validate the date format
+                datetime.strptime(date_input, "%Y-%m-%d")
+                print(f"Fetching videos from {date_input}...")
+                testBedMain(custom_date=date_input)
+            except ValueError:
+                print("Invalid date format. Please use YYYY-MM-DD format (e.g. 2025-06-10)")
         elif choice == '4':
             print("Exiting.")
             break

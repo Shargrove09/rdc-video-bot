@@ -5,9 +5,48 @@ from dotenv import load_dotenv
 from main import fetchVideosFromPlaylist, parse_videos, fuzzy_filter_videos
 from sheet import update_video_sheet
 from config import YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, MAX_PAGES_TO_FETCH
+from datetime import datetime, timedelta
+import logging
+from logging.handlers import RotatingFileHandler
+
 
 # Load environment variables from .env file
 load_dotenv()
+
+def setup_logging(log_dir="logs"):
+    """Configure logging to both console and file with rotation."""
+    # Create logs directory if it doesn't exist
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+        
+    # Generate log filename with date
+    log_filename = os.path.join(log_dir, f"video_bot_{datetime.now().strftime('%Y-%m-%d')}.log")
+    
+    # Configure root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Clear any existing handlers (important for repeated runs)
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    
+    # Create file handler for logging to file
+    file_handler = RotatingFileHandler(
+        log_filename, maxBytes=10*1024*1024, backupCount=5
+    )
+    file_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(file_format)
+    
+    # Create console handler for logging to console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(file_format)
+    
+    # Add both handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logging.info(f"Logging initialized. Log file: {log_filename}")
+    return logger
 
 def standard_video_script(published_after_date_str: str):
     """
@@ -18,11 +57,12 @@ def standard_video_script(published_after_date_str: str):
     Args:
         published_after_date_str: The date string (YYYY-MM-DD) after which videos should be fetched.
     """
+    logger = setup_logging()
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
     api_key = os.getenv("API_KEY")
     if not api_key:
-        print("Error: API_KEY not found. Make sure it's set in your .env file or environment variables.")
+        logger.error("API_KEY not found. Make sure it's set in your .env file or environment variables.")
         return
 
     try:
@@ -32,7 +72,7 @@ def standard_video_script(published_after_date_str: str):
             developerKey=api_key
         )
     except Exception as e:
-        print(f"Error building YouTube client: {e}")
+        logger.error(f"Error building YouTube client: {e}")
         return
 
     video_data = []
@@ -40,10 +80,10 @@ def standard_video_script(published_after_date_str: str):
     processed_videos_set = set()
     pages_fetched = 0
 
-    print(f"Starting video fetch for standard_video_script, for videos published after: {published_after_date_str}")
+    logger.info(f"Starting video fetch for standard_video_script, for videos published after: {published_after_date_str}")
 
     while pages_fetched < MAX_PAGES_TO_FETCH:
-        print(f"Fetching page {pages_fetched + 1} with token: {current_page_token if current_page_token else 'None'}")
+        logger.info(f"Fetching page {pages_fetched + 1} with token: {current_page_token if current_page_token else 'None'}")
         
         fetch_result = fetchVideosFromPlaylist(
             youtube,
@@ -53,7 +93,7 @@ def standard_video_script(published_after_date_str: str):
         )
 
         if not fetch_result:
-            print("Warning: fetchVideosFromPlaylist returned no result. Stopping.")
+            logger.warning("fetchVideosFromPlaylist returned no result. Stopping.")
             break
         
         items_on_page = fetch_result.get('items')
@@ -62,54 +102,54 @@ def standard_video_script(published_after_date_str: str):
         else:
             # This can happen if the date filter stops fetching early on a page, or API error.
             # fetchVideosFromPlaylist prints errors for HttpError.
-            print("No items found on this page or an error occurred in fetchVideosFromPlaylist.")
+            logger.warning("No items found on this page or an error occurred in fetchVideosFromPlaylist.")
 
         processed_videos_set = fetch_result.get('processed_videos_set', processed_videos_set)
         current_page_token = fetch_result.get('nextPageToken')
         pages_fetched += 1
 
         if not current_page_token:
-            print("No more pages to fetch (end of playlist or date filter met).")
+            logger.info("No more pages to fetch (end of playlist or date filter met).")
             break
 
         if pages_fetched >= MAX_PAGES_TO_FETCH:
-            print(f"Reached max page fetch limit of {MAX_PAGES_TO_FETCH}.")
+            logger.info(f"Reached max page fetch limit of {MAX_PAGES_TO_FETCH}.")
             break
 
     if not video_data:
-        print("No videos fetched. Exiting standard_video_script.")
+        logger.info("No videos fetched. Exiting standard_video_script.")
         return
 
     video_data.sort(key=lambda x: x['date'], reverse=True)
     df = pd.DataFrame(video_data)
 
     if df.empty:
-        print("DataFrame is empty after fetching and parsing. No videos to process.")
+        logger.info("DataFrame is empty after fetching and parsing. No videos to process.")
         return
     
-    print(f"--- \\n Original DF ({len(df)} videos) \\n --- \\n", df.head())
+    logger.info(f"--- \n Original DF ({len(df)} videos) \n --- \n {df.head()}")
     
     filtered_df = fuzzy_filter_videos(df) 
     
     if filtered_df.empty:
-        print("Filtered DataFrame is empty. No videos to update in the sheet.")
+        logger.info("Filtered DataFrame is empty. No videos to update in the sheet.")
         return
         
-    print(f"--- \\n Filtered DF ({len(filtered_df)} videos) \\n --- \\n", filtered_df.head())
+    logger.info(f"--- \n Filtered DF ({len(filtered_df)} videos) \n --- \n {filtered_df.head()}")
     
     try:
         update_video_sheet(filtered_df)
-        print("standard_video_script completed successfully.")
+        logger.info("standard_video_script completed successfully.")
     except Exception as e:
-        print(f"Error during update_video_sheet: {e}")
+        logger.error(f"Error during update_video_sheet: {e}")
 
 # Example of how to run this script (optional, for testing):
-# if __name__ == "__main__":
-#     # This part is for direct execution testing.
-#     # Ensure your .env file with API_KEY is accessible.
-#     # You might need to run this from the root of your project (rdc-video-bot)
-#     # using a command like: python -m rdc_video_bot.script
-#     # Or, if rdc_video_bot is in PYTHONPATH: python d:/repos/rdc-video-bot/rdc_video_bot/script.py
-#     print("Testing standard_video_script...")
-#     # Replace "YYYY-MM-DD" with a valid date for testing
-#     standard_video_script("2023-01-01")
+if __name__ == "__main__":
+    logger = setup_logging() # Setup logging for direct script run as well
+    import sys
+    if len(sys.argv) > 1:
+        date_param = sys.argv[1]
+    else:
+        date_param = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    logger.info(f"Testing standard_video_script with date: {date_param}")
+    standard_video_script(date_param)
