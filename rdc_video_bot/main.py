@@ -107,20 +107,19 @@ def testBedMain():
 
     api_key = os.getenv("API_KEY")
     youtube = googleapiclient.discovery.build(
-        YOUTUBE_API_SERVICE_NAME,  # Using imported constant
-        YOUTUBE_API_VERSION,       # Using imported constant
+        YOUTUBE_API_SERVICE_NAME, 
+        YOUTUBE_API_VERSION,     
         developerKey=api_key)
-    video_data = []
     
+    video_data = []
     current_page_token = None
     processed_videos_set = set()
 
     # Define target start date
-    published_after_filter_date = DEFAULT_PUBLISHED_AFTER_DATE  # Using imported constant
-
+    published_after_filter_date = DEFAULT_PUBLISHED_AFTER_DATE
     pages_fetched = 0
 
-    while pages_fetched < MAX_PAGES_TO_FETCH:  # Using imported constant
+    while pages_fetched < MAX_PAGES_TO_FETCH: 
         print(f"Fetching page {pages_fetched + 1} for testBedMain with token: {current_page_token}")
         fetch_result = fetchVideosFromPlaylist(youtube,
                                                pageToken=current_page_token,
@@ -153,16 +152,6 @@ def testBedMain():
     print("--- \n Filtered DF \n --- \n", filtered_df)
     update_video_sheet(filtered_df)
 
-def filter_videos(videos): 
-    filtered_videos = []
-    for _, video in videos.iterrows():
-        for game, keywords in VIDEO_FILTER.items():
-            if any(keyword.lower() in video['title'].lower() for keyword in keywords):
-                video['game'] = game
-                filtered_videos.append(video)
-                break
-    return pd.DataFrame(filtered_videos)
-
 def fuzzy_filter_videos(videos, threshold=80):
     filtered_videos = []
     
@@ -187,43 +176,35 @@ def fuzzy_filter_videos(videos, threshold=80):
     
     return pd.DataFrame(filtered_videos)
 
-def token_filter_videos(videos: pd.DataFrame, threshold=80):
-    filtered_videos = []
-    
-    for _, video in videos.iterrows():
-        title = video['title'].lower()
-        title_tokens = set(title.split())  # Split into individual words
-        
-        best_match = None
-        best_score = 0
-        
-        for game, keywords in VIDEO_FILTER.items():
-            for keyword in keywords:
-                keyword_tokens = set(keyword.lower().split())
-                
-                # Calculate how many keyword tokens appear in title
-                matching_tokens = keyword_tokens.intersection(title_tokens)
-                match_ratio = len(matching_tokens) / len(keyword_tokens) * 100
-                print(f"Match ratio for '{keyword}' in '{title}': {match_ratio:.2f}%")
-                
-                if match_ratio >= threshold and match_ratio > best_score:
-                    best_score = match_ratio
-                    best_match = game
-        
-        if best_match:
-            video['game'] = best_match
-            filtered_videos.append(video)
-    
-    return pd.DataFrame(filtered_videos)
+
+def interactive_menu():
+    """Displays an interactive menu to the user."""
+    while True:
+        print("\n--- RDC Video Bot Menu ---")
+        print("1. Fetch and update videos (current default behavior)")
+        print("2. Fetch stats from dashboard (Not Implemented Yet)")
+        print("3. Fetch videos from a specific date (Not Implemented Yet)")
+        print("4. Exit")
+
+        choice = input("Enter your choice (1-4): ")
+
+        if choice == '1':
+            print("Running: Fetch and update videos...")
+            testBedMain()
+        elif choice == '2':
+            print("Fetching stats from dashboard... (Not Implemented Yet)")
+            # Placeholder for fetch_dashboard_stats()
+        elif choice == '3':
+            date_input = input("Enter the date to fetch videos from (YYYY-MM-DD): ")
+            print(f"Fetching videos from {date_input}... (Not Implemented Yet)")
+            # Placeholder for fetching videos from a specific date
+            # You could call testBedMain with a date parameter: testBedMain(published_after_filter_date=date_input)
+            # Ensure testBedMain is modified to accept this parameter.
+        elif choice == '4':
+            print("Exiting.")
+            break
+        else:
+            print("Invalid choice. Please try again.")
 
 if __name__ == "__main__":
-    # main()
-    user_input = input("Would you like to run main or testbedmain? (m/t): ")
-    if user_input.lower() == 'm':
-        print("Not running main anymore, use testbedmain instead.")
-        testBedMain()
-    elif user_input.lower() == 't':
-        testBedMain()
-    else:
-        print("Invalid input. Please enter 'm' for main or 't' for testbedmain.")
-        exit(1)
+    interactive_menu()
