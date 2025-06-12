@@ -3,7 +3,7 @@ import googleapiclient.discovery
 import googleapiclient.errors
 import pandas as pd
 from dotenv import load_dotenv
-from sheet import update_video_sheet
+from sheet import update_video_sheet, fetch_dashboard_stats
 from datetime import datetime
 from rapidfuzz import fuzz, process
 from colorama import Fore, Style, init as colorama_init # Import colorama
@@ -165,6 +165,8 @@ def fuzzy_filter_videos(videos, threshold=80):
                 score = fuzz.partial_ratio(keyword.lower(), title)
                 if score > threshold:
                     matched_games.add(game)
+                    if(game == "Lethal Company"): 
+                        print(f"{Fore.CYAN}Matched '{keyword}' in title '{title}' with score {score}{Style.RESET_ALL}")
         print(f'Matched games for {title}: {matched_games}')
         
         if matched_games:
@@ -174,6 +176,55 @@ def fuzzy_filter_videos(videos, threshold=80):
     
     return pd.DataFrame(filtered_videos)
 
+def display_dashboard_stats():
+    """Fetches and displays dashboard statistics in a formatted way."""
+    dashboard_df = fetch_dashboard_stats()
+    
+    if dashboard_df is None:
+        print(f"{Fore.RED}Failed to fetch dashboard statistics. Try running option 1 first to populate the dashboard.{Style.RESET_ALL}")
+        return
+    
+    if dashboard_df.empty:
+        print(f"{Fore.YELLOW}Dashboard sheet exists but contains no data.{Style.RESET_ALL}")
+        return
+    
+    print(f"\n{Fore.CYAN}=== Dashboard Statistics ==={Style.RESET_ALL}")
+    
+    # Format the display for better readability
+    # Set Pandas display options for better formatting
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 1000)
+    pd.set_option('display.colheader_justify', 'left')
+    pd.set_option('display.precision', 3)
+    
+    # Check if we have the expected column structure
+    if 'Statistic' in dashboard_df.columns and 'Value' in dashboard_df.columns:
+        # Create a more visually appealing format
+        for _, row in dashboard_df.iterrows():
+            stat = row['Statistic']
+            val = row['Value']
+            
+            # Color-code based on the type of statistic
+            if stat.startswith('---'):
+                # Section header
+                print(f"\n{Fore.CYAN}{stat}{Style.RESET_ALL}")
+            elif 'not' in stat.lower() or 'error' in stat.lower():
+                # Potential issues highlighted in yellow
+                print(f"{Fore.YELLOW}{stat}: {val}{Style.RESET_ALL}")
+            else:
+                # Standard stats in green
+                print(f"{Fore.GREEN}{stat}: {val}{Style.RESET_ALL}")
+    else:
+        # Fallback to standard DataFrame display if structure is different
+        print(dashboard_df)
+    
+    # Reset Pandas display options
+    pd.reset_option('display.max_rows')
+    pd.reset_option('display.max_columns')
+    pd.reset_option('display.width')
+    pd.reset_option('display.colheader_justify')
+    pd.reset_option('display.precision')
 
 def interactive_menu():
     """Displays an interactive menu to the user."""
@@ -181,7 +232,7 @@ def interactive_menu():
     while True:
         print(f"\n{Fore.CYAN}--- RDC Video Bot Menu ---{Style.RESET_ALL}")
         print(f"{Fore.GREEN}1. Fetch and update videos (current default behavior){Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}2. Fetch stats from dashboard (Not Implemented Yet){Style.RESET_ALL}")
+        print(f"{Fore.GREEN}2. Fetch stats from dashboard{Style.RESET_ALL}")
         print(f"{Fore.GREEN}3. Fetch videos from a specific date{Style.RESET_ALL}")
         print(f"{Fore.RED}4. Exit{Style.RESET_ALL}")
 
@@ -191,8 +242,8 @@ def interactive_menu():
             print(f"{Fore.GREEN}Running: Fetch and update videos...{Style.RESET_ALL}")
             testBedMain()
         elif choice == '2':
-            print(f"{Fore.YELLOW}Fetching stats from dashboard... (Not Implemented Yet){Style.RESET_ALL}")
-            # Placeholder for fetch_dashboard_stats()
+            print(f"{Fore.YELLOW}Fetching stats from dashboard...{Style.RESET_ALL}")
+            display_dashboard_stats()
         elif choice == '3':
             date_input = input(f"{Fore.BLUE}Enter the date to fetch videos from (YYYY-MM-DD): {Style.RESET_ALL}")
             try:

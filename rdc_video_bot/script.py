@@ -48,6 +48,7 @@ def setup_logging(log_dir="logs"):
     logging.info(f"Logging initialized. Log file: {log_filename}")
     return logger
 
+# TODO: Update dashboard as well 
 def standard_video_script(published_after_date_str: str):
     """
     Fetches YouTube videos from a playlist published after a specific date,

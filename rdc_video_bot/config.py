@@ -22,6 +22,7 @@ VIDEO_FILTER = {
         "Black Ops 6",
     ],
     "Rocket League": ["Rocket League"],
+    "Lethal Company": ["Lethal Company", ],
 
 }
 
