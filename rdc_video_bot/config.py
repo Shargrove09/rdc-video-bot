@@ -20,6 +20,9 @@ VIDEO_FILTER = {
         "Call of Duty Warzone", 
         "Call of Duty Black Ops Cold War",
         "Black Ops 6",
+        "Modern Warfare 3",
+        "MW3",
+        "CoD Gun Game"
     ],
     "Rocket League": ["Rocket League"],
     "Lethal Company": ["Lethal Company", ],

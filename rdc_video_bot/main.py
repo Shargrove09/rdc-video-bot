@@ -228,15 +228,19 @@ def display_dashboard_stats():
 
 def interactive_menu():
     """Displays an interactive menu to the user."""
+    from script import fetch_game_videos_from_playlist
+    from script import find_and_add_game_videos
     colorama_init(autoreset=True)  # Initialize colorama
     while True:
         print(f"\n{Fore.CYAN}--- RDC Video Bot Menu ---{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}1. Fetch and update videos (current default behavior){Style.RESET_ALL}")
+        print(f"\n{Fore.GREEN}1. Fetch and update videos (current default behavior){Style.RESET_ALL}")
         print(f"{Fore.GREEN}2. Fetch stats from dashboard{Style.RESET_ALL}")
         print(f"{Fore.GREEN}3. Fetch videos from a specific date{Style.RESET_ALL}")
-        print(f"{Fore.RED}4. Exit{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}4. Fetch videos for a specific game {Style.RESET_ALL}")
+        print(f"{Fore.GREEN}5. Find and add new videos for a specific game{Style.RESET_ALL}")
+        print(f"{Fore.RED}0. Exit{Style.RESET_ALL}")
 
-        choice = input(f"{Fore.BLUE}Enter your choice (1-4): {Style.RESET_ALL}")
+        choice = input(f"\n{Fore.BLUE}Enter your choice (1-5): {Style.RESET_ALL}")
 
         if choice == '1':
             print(f"{Fore.GREEN}Running: Fetch and update videos...{Style.RESET_ALL}")
@@ -254,6 +258,28 @@ def interactive_menu():
             except ValueError:
                 print(f"{Fore.RED}Invalid date format. Please use YYYY-MM-DD format (e.g. 2025-06-10){Style.RESET_ALL}")
         elif choice == '4':
+            game_name = input(f"{Fore.BLUE}Enter the game name to fetch videos for (e.g. MK8, COD): {Style.RESET_ALL}")
+            if game_name in VIDEO_FILTER:
+                ask = input(f"{Fore.YELLOW}You entered '{game_name}'. Do you want fetch from a certain date? Default Date is: {DEFAULT_PUBLISHED_AFTER_DATE}: {Style.RESET_ALL}")
+                if ask.lower() in ['yes', 'y']:
+                    date_input = input(f"{Fore.BLUE}Enter the date to fetch videos from (YYYY-MM-DD): {Style.RESET_ALL}")
+                    try:
+                        # Validate the date format
+                        datetime.strptime(date_input, "%Y-%m-%d")
+                        print(f"{Fore.GREEN}Fetching videos for game: {game_name} from {date_input}...{Style.RESET_ALL}")
+                        fetch_game_videos_from_playlist(game_name, published_after_str=date_input)
+                    except ValueError:
+                        print(f"{Fore.RED}Invalid date format. Please use YYYY-MM-DD format (e.g. 2025-06-10){Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.GREEN}Fetching videos for game: {game_name}...{Style.RESET_ALL}")
+                    fetch_game_videos_from_playlist(game_name)
+        elif choice == '5':
+            game_name = input(f"{Fore.BLUE}Enter the game name to find and add new videos for (e.g. MK8, COD): {Style.RESET_ALL}")
+            if game_name in VIDEO_FILTER:
+                find_and_add_game_videos(game_name)
+            else:
+                print(f"{Fore.RED}Game '{game_name}' not found in VIDEO_FILTER. Available games: {list(VIDEO_FILTER.keys())}{Style.RESET_ALL}")
+        elif choice == '0':
             print(f"{Fore.RED}Exiting.{Style.RESET_ALL}")
             break
         else:
