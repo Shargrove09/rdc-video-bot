@@ -242,6 +242,14 @@ def fetch_game_videos_from_playlist(game_name, published_after_str=DEFAULT_PUBLI
     
      
     # Prompt user for date input
+    user_date = input(f"Enter the date to search from (YYYY-MM-DD) or press Enter to use default ({published_after_str}): ").strip()
+    if user_date:
+        try:
+            # Validate date format
+            datetime.strptime(user_date, "%Y-%m-%d")
+            published_after_str = user_date
+        except ValueError:
+            logger.warning(f"Invalid date format '{user_date}'. Using default date: {published_after_str}")
    
     try:
         youtube = googleapiclient.discovery.build(
