@@ -13,7 +13,7 @@ def update_dashboard_sheet(gc, videos_df_original): # gc is gspread client, vide
             dashboard_sheet = sh.worksheet("Dashboard")
         except gspread.exceptions.WorksheetNotFound:
             print("Dashboard sheet not found, creating one.")
-            # Create with a reasonable number of rows for stats and 2 columns
+            # Create basic dashboard sheet if it doesn't exist
             dashboard_sheet = sh.add_worksheet(title="Dashboard", rows="20", cols="2")
 
         videos_df = videos_df_original.copy() # Work with a copy to avoid modifying the original DataFrame
@@ -146,7 +146,32 @@ def _setup_google_sheets_connection():
     print(f"--- Connecting to Sheet: '{current_sheet.title}' in Spreadsheet: '{SPREADSHEET_NAME}' ---")
     return gc, current_sheet
 
+
 def _normalize_dataframe_columns(df, df_name="DataFrame"):
+    """
+    Normalizes 'added_to_db' and 'date' columns in a DataFrame.
+    This helper function ensures consistent formatting for key columns:
+    - For 'added_to_db': Ensures it exists and contains boolean values
+    - For 'date': Converts to datetime objects with proper error handling
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        The DataFrame to normalize. Can be None or empty.
+    df_name : str, default="DataFrame"
+        Name identifier for the DataFrame, used in warning messages.
+    Returns:
+    --------
+    pandas.DataFrame
+        The normalized DataFrame with consistent column formats.
+        If input df is None, returns empty DataFrame.
+        If input df is empty, returns the empty DataFrame.
+    Notes:
+    ------
+    - When 'added_to_db' column is missing, it's created with False values
+    - Values in 'added_to_db' are normalized to boolean: 'TRUE'/True → True, 'FALSE'/False → False
+    - Date parsing uses pd.to_datetime with errors='coerce' (invalid dates become NaT)
+    - Warnings are printed when dates fail to parse or 'date' column is missing
+    """
     """Normalizes 'added_to_db' and 'date' columns in a DataFrame."""
     if df is None or df.empty:
         # print(f"Info ({df_name}): DataFrame is empty or None, skipping normalization.")
@@ -159,7 +184,7 @@ def _normalize_dataframe_columns(df, df_name="DataFrame"):
     else:
         df['added_to_db'] = df['added_to_db'].astype(str).str.upper().map({
             'TRUE': True, 'FALSE': False, True: True, False: False
-        }).fillna(False)
+        }).fillna(False).infer_objects(copy=False)
 
     # Normalize 'date'
     if 'date' in df.columns:
@@ -365,8 +390,7 @@ def update_video_sheet(fetched_video_frame, show_detailed_info=False):
 
     except Exception as e:
         _handle_update_video_sheet_errors(e)
-    
-        
+            
 """Prints detailed information about a DataFrame including shape, columns, data types, first few rows, missing values, unique values per column, and basic statistics."""
 def print_dataframe_info(df, name="DataFrame"):
     print(f"\n=== {name} Information ===")
