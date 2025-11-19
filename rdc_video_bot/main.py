@@ -1,263 +1,288 @@
+"""
+This module is the main entry point for the RDC Video Bot.
+It provides an interactive menu to fetch video data from a YouTube playlist,
+filter it, and update a Google Sheet.
+"""
 import os
+from datetime import datetime
 import googleapiclient.discovery
 import googleapiclient.errors
 import pandas as pd
 from dotenv import load_dotenv
+from rapidfuzz import fuzz
+from colorama import Fore, Style, init as colorama_init
+from typing import List, Dict, Set, Optional, Tuple, Any
+
 from sheet import update_video_sheet, fetch_dashboard_stats
-from datetime import datetime
-from rapidfuzz import fuzz, process
-from colorama import Fore, Style, init as colorama_init # Import colorama
-from config import VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
+from config import (
+    VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
+    YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
+)
 
+# --- YouTube Client Class ---
 
-scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
+class YouTubeClient:
+    """A client to interact with the YouTube Data API."""
 
-load_dotenv()
+    def __init__(self, api_key: str):
+        """
+        Initializes the YouTube API client.
+        Args:
+            api_key: The YouTube Data API key.
+        """
+        if not api_key:
+            raise ValueError("API key cannot be empty.")
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+        self.youtube = googleapiclient.discovery.build(
+            YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, developerKey=api_key
+        )
 
-def fetchVideosFromPlaylist(youtube, pageToken=None, proccessed_videos=None, published_after_str=None):
-    if proccessed_videos is None:
-        proccessed_videos = set()
-
-    target_date_obj = None
-    if published_after_str:
+    def fetch_playlist_page(self, page_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Fetches a single page of playlist items.
+        Args:
+            page_token: The token for the next page of results.
+        Returns:
+            The API response dictionary or None if an error occurs.
+        """
         try:
-            target_date_obj = datetime.strptime(published_after_str, "%Y-%m-%d").date()
-        except ValueError:
-            print(f"Warning: Invalid date format for published_after_str: '{published_after_str}'. Expected YYYY-MM-DD. Date filter will not be applied.")
-            # Keep target_date_obj as None if format is invalid
+            request = self.youtube.playlistItems().list(
+                part="snippet,contentDetails",
+                maxResults=50,
+                playlistId=YOUTUBE_PLAYLIST_ID,
+                pageToken=page_token
+            )
+            return request.execute()
+        except googleapiclient.errors.HttpError as e:
+            print(f"{Fore.RED}An API error occurred: {e}{Style.RESET_ALL}")
+            return None
 
-    if not youtube:
-        print("Youtube Client not initialized!")
-        return {'items': [], 'nextPageToken': None, 'processed_videos_set': proccessed_videos}
+# --- Core Logic Functions ---
+
+def fetch_and_process_videos(youtube_client: YouTubeClient, published_after_str: str) -> List[Dict[str, Any]]:
+    """
+    Fetches and processes all videos from a playlist from a given date.
+    Args:
+        youtube_client: An instance of the YouTubeClient.
+        published_after_str: The earliest publish date for videos (YYYY-MM-DD).
+    Returns:
+        A list of dictionaries, where each dictionary represents a processed video.
+    """
+    all_videos = []
+    processed_video_ids: Set[str] = set()
+    current_page_token: Optional[str] = None
+    pages_fetched = 0
 
     try:
-        playlist_request = youtube.playlistItems().list(
-            part="snippet,contentDetails",
-            maxResults=50,  # 50 is max limit set by YT API
-            playlistId=YOUTUBE_PLAYLIST_ID,  # Using imported constant
-            pageToken=pageToken
-        )
-        playlist_response = playlist_request.execute()
-    except googleapiclient.errors.HttpError as e:
-        print(f"An API error occurred: {e}")
-        return {'items': [], 'nextPageToken': None, 'processed_videos_set': proccessed_videos}
+        target_date = datetime.strptime(published_after_str, "%Y-%m-%d").date()
+    except ValueError:
+        print(f"{Fore.RED}Invalid date format: '{published_after_str}'. Using default.{Style.RESET_ALL}")
+        target_date = datetime.strptime(DEFAULT_PUBLISHED_AFTER_DATE, "%Y-%m-%d").date()
 
-    # print(playlist_response) # Optional: for debugging API response
+    while pages_fetched < MAX_PAGES_TO_FETCH:
+        print(f"Fetching page {pages_fetched + 1}...")
+        response = youtube_client.fetch_playlist_page(current_page_token)
 
-    fetched_items_on_page = playlist_response.get('items', [])
-    # print(f"Fetched {len(fetched_items_on_page)} videos from API for pageToken: {pageToken}") # Optional debug
+        if not response:
+            break
 
-    filtered_videos_for_return = []
-    stop_fetching_more_pages = False
+        items = response.get('items', [])
+        if not items:
+            print("No items found on this page.")
+            break
 
-    for item in fetched_items_on_page:
-        video_published_at_str = item['contentDetails']['videoPublishedAt']
-        # Convert to date object for comparison
-        video_published_date = datetime.strptime(video_published_at_str, "%Y-%m-%dT%H:%M:%SZ").date()
+        stop_fetching = False
+        for item in items:
+            video_id = item['contentDetails']['videoId']
+            published_at_str = item['contentDetails']['videoPublishedAt']
+            published_date = datetime.strptime(published_at_str, "%Y-%m-%dT%H:%M:%SZ").date()
 
-        if target_date_obj and video_published_date < target_date_obj:
-            # Assuming playlist items are generally ordered newest first.
-            # If this item is too old, subsequent items on this page and on future pages are also likely too old.
-            print(f"Video '{item['snippet']['title']}' (published {video_published_date}) is older than target date {target_date_obj}. Stopping further pagination.")
-            stop_fetching_more_pages = True
-            break  # Stop processing items on this page
+            if published_date < target_date:
+                stop_fetching = True
+                break
 
-        video_id = item['contentDetails']['videoId']
-        if video_id not in proccessed_videos:
-            proccessed_videos.add(video_id)
-            filtered_videos_for_return.append(item)
+            if video_id not in processed_video_ids:
+                processed_video_ids.add(video_id)
+                all_videos.append(item)
 
-    current_next_page_token = playlist_response.get('nextPageToken')
-    
-    # If date filter triggered stop, ensure no next page token is returned
-    if stop_fetching_more_pages:
-        current_next_page_token = None
-    
-    # print(f"Returning {len(filtered_videos_for_return)} videos after filtering. Next page token: {current_next_page_token}") # Optional debug
+        if stop_fetching:
+            print(f"Reached videos older than {target_date}. Stopping.")
+            break
 
-    return {
-        'items': filtered_videos_for_return,
-        'nextPageToken': current_next_page_token,
-        'processed_videos_set': proccessed_videos
-    }
+        current_page_token = response.get('nextPageToken')
+        if not current_page_token:
+            print("End of playlist reached.")
+            break
 
-def parse_videos(playlist_results, video_data_list): 
-    # The 'items' key is still present in the dictionary returned by the modified fetchVideosFromPlaylist
-    for video in playlist_results.get('items', []): 
+        pages_fetched += 1
+        if pages_fetched >= MAX_PAGES_TO_FETCH:
+            print(f"Reached max page fetch limit of {MAX_PAGES_TO_FETCH}.")
+
+    return all_videos
+
+def parse_video_data(videos: List[Dict[str, Any]]) -> pd.DataFrame:
+    """
+    Parses raw video data from the API into a structured DataFrame.
+    Args:
+        videos: A list of video items from the YouTube API.
+    Returns:
+        A DataFrame containing structured video data.
+    """
+    video_data_list = []
+    for video in videos:
         title = video['snippet']['title']
         video_id = video['contentDetails']['videoId']
-        print(f"Title: {title}\nVideo ID: {video_id}\n")
-        content_details = video['contentDetails']
-
-        date_str = content_details['videoPublishedAt']
+        date_str = video['contentDetails']['videoPublishedAt']
         date_obj = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
-        formatted_date = date_obj.strftime("%Y-%m-%d %H:%M:%S")
 
         video_data_list.append({
             "title": title,
-            "video_id": "https://www.youtube.com/watch?v=" + video_id,
-            "date": formatted_date,
+            "video_id": f"https://www.youtube.com/watch?v={video_id}",
+            "date": date_obj.strftime("%Y-%m-%d %H:%M:%S"),
             "added_to_db": False,
             "date_added_to_db": None
-        }) 
+        })
+    return pd.DataFrame(video_data_list)
 
+def fuzzy_filter_videos(videos_df: pd.DataFrame, threshold: int = 80) -> pd.DataFrame:
+    """
+    Filters a DataFrame of videos based on fuzzy matching of titles.
+    This version is optimized for performance.
+    Args:
+        videos_df: DataFrame with video data, including a 'title' column.
+        threshold: Fuzzy match confidence score (0-100).
+    Returns:
+        A new DataFrame with only the matched videos and a 'games' column.
+    """
+    if videos_df.empty:
+        return pd.DataFrame()
 
-
-def testBedMain(custom_date=None): 
-    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-
-    api_key = os.getenv("API_KEY")
-    youtube = googleapiclient.discovery.build(
-        YOUTUBE_API_SERVICE_NAME, 
-        YOUTUBE_API_VERSION,     
-        developerKey=api_key)
+    # Pre-compile keywords for faster access
+    game_keywords = {game: [kw.lower() for kw in keywords] for game, keywords in VIDEO_FILTER.items()}
     
-    video_data = []
-    current_page_token = None
-    processed_videos_set = set()
+    filtered_data = []
+    for video_row in videos_df.itertuples(index=False):
+        title_lower = video_row.title.lower()
+        matched_games: Set[str] = set()
 
-    # Define target start date
-    published_after_filter_date = custom_date if custom_date else DEFAULT_PUBLISHED_AFTER_DATE
-    pages_fetched = 0
-
-    while pages_fetched < MAX_PAGES_TO_FETCH: 
-        print(f"Fetching page {pages_fetched + 1} for testBedMain with token: {current_page_token}")
-        fetch_result = fetchVideosFromPlaylist(youtube,
-                                               pageToken=current_page_token,
-                                               proccessed_videos=processed_videos_set,
-                                               published_after_str=published_after_filter_date)
-        
-        if not fetch_result:
-            print("Error fetching videos for testBedMain. Stopping.")
-            break
-
-        if fetch_result.get('items'):
-            parse_videos(fetch_result, video_data)
-        
-        processed_videos_set = fetch_result['processed_videos_set']
-        current_page_token = fetch_result.get('nextPageToken')
-
-        pages_fetched += 1
-        
-        if not current_page_token:
-            print("No more pages to fetch for testBedMain (end of playlist or date filter).")
-            break
-
-        if pages_fetched >= MAX_PAGES_TO_FETCH:
-            print(f"Reached max page fetch limit of {MAX_PAGES_TO_FETCH} for testBedMain.")
-            break
-    
-    video_data.sort(key=lambda x: x['date'], reverse=True)
-    df = pd.DataFrame(video_data)
-    filtered_df = fuzzy_filter_videos(df)
-    print("--- \n Filtered DF \n --- \n", filtered_df)
-    update_video_sheet(filtered_df)
-
-def fuzzy_filter_videos(videos, threshold=80):
-    filtered_videos = []
-    
-    for _, video in videos.iterrows():
-        title = video['title'].lower()
-        matched_games = set()
-        
-        for game, keywords in VIDEO_FILTER.items():
+        for game, keywords in game_keywords.items():
             for keyword in keywords:
-                score = fuzz.partial_ratio(keyword.lower(), title)
-                if score > threshold:
+                if fuzz.partial_ratio(keyword, title_lower) > threshold:
                     matched_games.add(game)
-                    if(game == "Lethal Company"): 
-                        print(f"{Fore.CYAN}Matched '{keyword}' in title '{title}' with score {score}{Style.RESET_ALL}")
-        print(f'Matched games for {title}: {matched_games}')
+                    # Break after first keyword match for a game to be slightly faster
+                    break 
         
         if matched_games:
-            video = video.copy()  # Avoid SettingWithCopyWarning
-            video['games'] = ', '.join(sorted(matched_games))
-            filtered_videos.append(video)
-    
-    return pd.DataFrame(filtered_videos)
+            # Convert NamedTuple to dict and add games
+            video_dict = video_row._asdict()
+            video_dict['games'] = ', '.join(sorted(matched_games))
+            filtered_data.append(video_dict)
+            
+    return pd.DataFrame(filtered_data)
+
+# --- UI and Main Execution Functions ---
 
 def display_dashboard_stats():
     """Fetches and displays dashboard statistics in a formatted way."""
     dashboard_df = fetch_dashboard_stats()
     
     if dashboard_df is None:
-        print(f"{Fore.RED}Failed to fetch dashboard statistics. Try running option 1 first to populate the dashboard.{Style.RESET_ALL}")
+        print(f"{Fore.RED}Failed to fetch dashboard statistics. Try running option 1 first.{Style.RESET_ALL}")
         return
     
     if dashboard_df.empty:
-        print(f"{Fore.YELLOW}Dashboard sheet exists but contains no data.{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Dashboard sheet is empty.{Style.RESET_ALL}")
         return
     
     print(f"\n{Fore.CYAN}=== Dashboard Statistics ==={Style.RESET_ALL}")
     
-    # Format the display for better readability
-    # Set Pandas display options for better formatting
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
     pd.set_option('display.width', 1000)
-    pd.set_option('display.colheader_justify', 'left')
-    pd.set_option('display.precision', 3)
     
-    # Check if we have the expected column structure
     if 'Statistic' in dashboard_df.columns and 'Value' in dashboard_df.columns:
-        # Create a more visually appealing format
         for _, row in dashboard_df.iterrows():
-            stat = row['Statistic']
-            val = row['Value']
-            
-            # Color-code based on the type of statistic
-            if stat.startswith('---'):
-                # Section header
-                print(f"\n{Fore.CYAN}{stat}{Style.RESET_ALL}")
-            elif 'not' in stat.lower() or 'error' in stat.lower():
-                # Potential issues highlighted in yellow
-                print(f"{Fore.YELLOW}{stat}: {val}{Style.RESET_ALL}")
-            else:
-                # Standard stats in green
-                print(f"{Fore.GREEN}{stat}: {val}{Style.RESET_ALL}")
+            stat, val = row['Statistic'], row['Value']
+            color = Fore.GREEN
+            if stat.startswith('---'): color = Fore.CYAN
+            elif 'not' in str(stat).lower() or 'error' in str(stat).lower(): color = Fore.YELLOW
+            print(f"{color}{stat}: {val}{Style.RESET_ALL}")
     else:
-        # Fallback to standard DataFrame display if structure is different
-        print(dashboard_df)
+        print(dashboard_df.to_string())
     
-    # Reset Pandas display options
-    pd.reset_option('display.max_rows')
-    pd.reset_option('display.max_columns')
     pd.reset_option('display.width')
-    pd.reset_option('display.colheader_justify')
-    pd.reset_option('display.precision')
 
-def interactive_menu():
-    """Displays an interactive menu to the user."""
-    colorama_init(autoreset=True)  # Initialize colorama
+def run_video_processing(youtube_client: YouTubeClient, custom_date: Optional[str] = None):
+    """
+    Main workflow to fetch, parse, filter, and upload video data.
+    Args:
+        youtube_client: An initialized YouTubeClient.
+        custom_date: A specific start date (YYYY-MM-DD) to fetch from.
+    """
+    published_after_filter_date = custom_date or DEFAULT_PUBLISHED_AFTER_DATE
+    print(f"Fetching videos published after: {published_after_filter_date}")
+
+    raw_videos = fetch_and_process_videos(youtube_client, published_after_filter_date)
+    
+    if not raw_videos:
+        print("No new videos found to process.")
+        return
+
+    video_df = parse_video_data(raw_videos)
+    video_df.sort_values(by='date', ascending=False, inplace=True)
+    
+    filtered_df = fuzzy_filter_videos(video_df)
+    
+    if filtered_df.empty:
+        print("No videos matched the filter criteria.")
+        return
+
+    print(f"\n{Fore.CYAN}--- Filtered Videos ---{Style.RESET_ALL}\n", filtered_df)
+    update_video_sheet(filtered_df)
+
+def interactive_menu(youtube_client: YouTubeClient):
+    """Displays an interactive command-line menu for the user."""
     while True:
         print(f"\n{Fore.CYAN}--- RDC Video Bot Menu ---{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}1. Fetch and update videos (current default behavior){Style.RESET_ALL}")
-        print(f"{Fore.GREEN}2. Fetch stats from dashboard{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}3. Fetch videos from a specific date{Style.RESET_ALL}")
+        print("1. Fetch and update videos (default)")
+        print("2. Fetch stats from dashboard")
+        print("3. Fetch videos from a specific date")
         print(f"{Fore.RED}4. Exit{Style.RESET_ALL}")
 
         choice = input(f"{Fore.BLUE}Enter your choice (1-4): {Style.RESET_ALL}")
 
         if choice == '1':
-            print(f"{Fore.GREEN}Running: Fetch and update videos...{Style.RESET_ALL}")
-            testBedMain()
+            run_video_processing(youtube_client)
         elif choice == '2':
-            print(f"{Fore.YELLOW}Fetching stats from dashboard...{Style.RESET_ALL}")
             display_dashboard_stats()
         elif choice == '3':
-            date_input = input(f"{Fore.BLUE}Enter the date to fetch videos from (YYYY-MM-DD): {Style.RESET_ALL}")
+            date_input = input("Enter the date (YYYY-MM-DD): ")
             try:
-                # Validate the date format
                 datetime.strptime(date_input, "%Y-%m-%d")
-                print(f"{Fore.GREEN}Fetching videos from {date_input}...{Style.RESET_ALL}")
-                testBedMain(custom_date=date_input)
+                run_video_processing(youtube_client, custom_date=date_input)
             except ValueError:
-                print(f"{Fore.RED}Invalid date format. Please use YYYY-MM-DD format (e.g. 2025-06-10){Style.RESET_ALL}")
+                print(f"{Fore.RED}Invalid date format. Please use YYYY-MM-DD.{Style.RESET_ALL}")
         elif choice == '4':
             print(f"{Fore.RED}Exiting.{Style.RESET_ALL}")
             break
         else:
             print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
 
+def main():
+    """Initializes resources and starts the interactive menu."""
+    colorama_init(autoreset=True)
+    load_dotenv()
+
+    api_key = os.getenv("API_KEY")
+    if not api_key:
+        print(f"{Fore.RED}Error: API_KEY not found in .env file.{Style.RESET_ALL}")
+        return
+
+    try:
+        youtube_client = YouTubeClient(api_key)
+        interactive_menu(youtube_client)
+    except ValueError as e:
+        print(f"{Fore.RED}Initialization failed: {e}{Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.RED}An unexpected error occurred: {e}{Style.RESET_ALL}")
+
 if __name__ == "__main__":
-    interactive_menu()
+    main()

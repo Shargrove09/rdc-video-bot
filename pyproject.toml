@@ -1,21 +1,21 @@
-[tool.poetry]
+[project]
 name = "rdc-video-bot"
 version = "0.1.0"
 description = ""
-authors = ["Shargrove09 <8881163+Shargrove09@users.noreply.github.com>"]
+authors = [{ name = "Shargrove09", email = "8881163+Shargrove09@users.noreply.github.com" }]
+requires-python = ">=3.10,<4"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.10"
-google-auth-oauthlib = "^1.0.0"
-google-api-python-client = "^2.0.0"
-pandas = "^2.0.0"
-python-dotenv = "^1.0.0"
-gspread = "^5.0.0"
-gspread-dataframe = "^3.0.0"
-rapidfuzz = "^3.0.0"
-colorama = "^0.4.6"
+dependencies = [
+    "google-auth-oauthlib>=1.0.0,<2",
+    "google-api-python-client>=2.0.0,<3",
+    "pandas>=2.0.0,<3",
+    "python-dotenv>=1.0.0,<2",
+    "gspread>=5.0.0,<6",
+    "gspread-dataframe>=3.0.0,<4",
+    "rapidfuzz>=3.0.0,<4",
+    "colorama>=0.4.6,<0.5",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
