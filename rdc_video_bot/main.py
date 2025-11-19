@@ -13,7 +13,7 @@ from rapidfuzz import fuzz
 from colorama import Fore, Style, init as colorama_init
 from typing import List, Dict, Set, Optional, Tuple, Any
 
-from sheet import update_video_sheet, fetch_dashboard_stats
+from sheet import update_video_sheet, fetch_dashboard_stats, fetch_latest_videos
 from config import (
     VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
     YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
@@ -210,6 +210,28 @@ def display_dashboard_stats():
     
     pd.reset_option('display.width')
 
+def display_latest_videos():
+    """Fetches and displays the latest videos from the sheet."""
+    try:
+        limit_input = input(f"{Fore.BLUE}How many rows to show? (Default 10): {Style.RESET_ALL}")
+        limit = int(limit_input) if limit_input.strip() else 10
+    except ValueError:
+        print(f"{Fore.RED}Invalid input. Using default of 10.{Style.RESET_ALL}")
+        limit = 10
+
+    print(f"Fetching latest {limit} videos...")
+    latest_videos = fetch_latest_videos(limit)
+
+    if latest_videos is not None and not latest_videos.empty:
+        print(f"\n{Fore.CYAN}=== Latest {limit} Videos ==={Style.RESET_ALL}")
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', 1000)
+        print(latest_videos.to_string(index=False))
+        pd.reset_option('display.max_columns')
+        pd.reset_option('display.width')
+    else:
+        print(f"{Fore.YELLOW}No videos found.{Style.RESET_ALL}")
+
 def run_video_processing(youtube_client: YouTubeClient, custom_date: Optional[str] = None):
     """
     Main workflow to fetch, parse, filter, and upload video data.
@@ -245,9 +267,10 @@ def interactive_menu(youtube_client: YouTubeClient):
         print("1. Fetch and update videos (default)")
         print("2. Fetch stats from dashboard")
         print("3. Fetch videos from a specific date")
-        print(f"{Fore.RED}4. Exit{Style.RESET_ALL}")
+        print("4. Show latest videos from sheet")
+        print(f"{Fore.RED}5. Exit{Style.RESET_ALL}")
 
-        choice = input(f"{Fore.BLUE}Enter your choice (1-4): {Style.RESET_ALL}")
+        choice = input(f"{Fore.BLUE}Enter your choice (1-5): {Style.RESET_ALL}")
 
         if choice == '1':
             run_video_processing(youtube_client)
@@ -261,6 +284,8 @@ def interactive_menu(youtube_client: YouTubeClient):
             except ValueError:
                 print(f"{Fore.RED}Invalid date format. Please use YYYY-MM-DD.{Style.RESET_ALL}")
         elif choice == '4':
+            display_latest_videos()
+        elif choice == '5':
             print(f"{Fore.RED}Exiting.{Style.RESET_ALL}")
             break
         else:

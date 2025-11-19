@@ -222,6 +222,31 @@ def fetch_dashboard_stats() -> Optional[pd.DataFrame]:
         print(f"Failed to fetch dashboard stats: {e}")
         return None
 
+def fetch_latest_videos(limit: int = 10) -> Optional[pd.DataFrame]:
+    """
+    Fetches the latest 'limit' rows from the main video sheet.
+    Args:
+        limit: The number of rows to fetch.
+    Returns:
+        A DataFrame containing the latest videos.
+    """
+    try:
+        client = GoogleSheetsClient(SPREADSHEET_NAME)
+        df = client.get_sheet_as_dataframe(client.main_sheet.title)
+        
+        if df is None or df.empty:
+            print("Main sheet is empty.")
+            return None
+            
+        # Filter out unnamed columns
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+
+        # Assuming the sheet is sorted by date descending, return the top 'limit' rows
+        return df.head(limit)
+    except Exception as e:
+        print(f"Failed to fetch latest videos: {e}")
+        return None
+
 if __name__ == "__main__":
     # Example usage for testing purposes
     # You would need to create a sample DataFrame to test update_video_sheet
