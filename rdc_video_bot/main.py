@@ -16,7 +16,8 @@ from typing import List, Dict, Set, Optional, Tuple, Any
 from sheet import update_video_sheet, fetch_dashboard_stats, fetch_latest_videos
 from config import (
     VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
-    YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE
+    YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE,
+    get_games
 )
 
 # --- YouTube Client Class ---
@@ -232,6 +233,87 @@ def display_latest_videos():
     else:
         print(f"{Fore.YELLOW}No videos found.{Style.RESET_ALL}")
 
+def search_game_videos_from_playlist(youtube_client: YouTubeClient):
+    """Searches and displays videos for a specific game from the YouTube playlist."""
+    games = get_games()
+    
+    if not games:
+        print(f"{Fore.RED}No games configured in video filter.{Style.RESET_ALL}")
+        return
+    
+    # Display available games
+    print(f"\n{Fore.CYAN}=== Available Games ==={Style.RESET_ALL}")
+    for idx, game in enumerate(games, 1):
+        print(f"{idx}. {game}")
+    
+    # Get user selection
+    try:
+        choice = input(f"{Fore.BLUE}Select a game (1-{len(games)}): {Style.RESET_ALL}")
+        choice_idx = int(choice) - 1
+        if choice_idx < 0 or choice_idx >= len(games):
+            print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+            return
+        selected_game = games[choice_idx]
+    except (ValueError, IndexError):
+        print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+        return
+    
+    # Get optional date input
+    date_input = input(f"{Fore.BLUE}Enter start date (YYYY-MM-DD) or press Enter for default ({DEFAULT_PUBLISHED_AFTER_DATE}): {Style.RESET_ALL}").strip()
+    
+    if date_input:
+        try:
+            datetime.strptime(date_input, "%Y-%m-%d")
+            published_after_date = date_input
+        except ValueError:
+            print(f"{Fore.RED}Invalid date format. Using default: {DEFAULT_PUBLISHED_AFTER_DATE}{Style.RESET_ALL}")
+            published_after_date = DEFAULT_PUBLISHED_AFTER_DATE
+    else:
+        published_after_date = DEFAULT_PUBLISHED_AFTER_DATE
+    
+    print(f"\nSearching for {Fore.CYAN}{selected_game}{Style.RESET_ALL} videos published after {published_after_date}...")
+    
+    # Fetch videos from YouTube
+    raw_videos = fetch_and_process_videos(youtube_client, published_after_date)
+    
+    if not raw_videos:
+        print(f"{Fore.YELLOW}No videos found.{Style.RESET_ALL}")
+        return
+    
+    # Parse video data
+    video_df = parse_video_data(raw_videos)
+    
+    if video_df.empty:
+        print(f"{Fore.YELLOW}No videos to process.{Style.RESET_ALL}")
+        return
+    
+    # Filter by selected game using fuzzy matching
+    keywords = VIDEO_FILTER.get(selected_game, [])
+    if not keywords:
+        print(f"{Fore.RED}No keywords configured for {selected_game}.{Style.RESET_ALL}")
+        return
+    
+    keywords_lower = [kw.lower() for kw in keywords]
+    threshold = 80
+    
+    def matches_game(title: str) -> bool:
+        title_lower = title.lower()
+        return any(fuzz.partial_ratio(kw, title_lower) > threshold for kw in keywords_lower)
+    
+    filtered_df = video_df[video_df['title'].apply(matches_game)].copy()
+    
+    if filtered_df.empty:
+        print(f"{Fore.YELLOW}No videos found for {selected_game}.{Style.RESET_ALL}")
+        return
+    
+    # Display results
+    print(f"\n{Fore.CYAN}=== Found {len(filtered_df)} videos for {selected_game} ==={Style.RESET_ALL}")
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 1000)
+    print(filtered_df[['title', 'video_id', 'date']].to_string(index=False))
+    pd.reset_option('display.max_columns')
+    pd.reset_option('display.width')
+
 def run_video_processing(youtube_client: YouTubeClient, custom_date: Optional[str] = None):
     """
     Main workflow to fetch, parse, filter, and upload video data.
@@ -268,9 +350,10 @@ def interactive_menu(youtube_client: YouTubeClient):
         print("2. Fetch stats from dashboard")
         print("3. Fetch videos from a specific date")
         print("4. Show latest videos from sheet")
-        print(f"{Fore.RED}5. Exit{Style.RESET_ALL}")
+        print("5. Search videos by game from playlist")
+        print(f"{Fore.RED}6. Exit{Style.RESET_ALL}")
 
-        choice = input(f"{Fore.BLUE}Enter your choice (1-5): {Style.RESET_ALL}")
+        choice = input(f"{Fore.BLUE}Enter your choice (1-6): {Style.RESET_ALL}")
 
         if choice == '1':
             run_video_processing(youtube_client)
@@ -286,6 +369,8 @@ def interactive_menu(youtube_client: YouTubeClient):
         elif choice == '4':
             display_latest_videos()
         elif choice == '5':
+            search_game_videos_from_playlist(youtube_client)
+        elif choice == '6':
             print(f"{Fore.RED}Exiting.{Style.RESET_ALL}")
             break
         else:

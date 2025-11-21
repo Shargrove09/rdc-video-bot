@@ -76,11 +76,11 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame([("No data available", "")], columns=["Statistic", "Value"])
 
     stats = {
-        "Total Videos": len(videos_df),
-        "Videos Marked 'added_to_db'": videos_df['added_to_db'].astype(str).str.upper().eq('TRUE').sum(),
-        "Unique Video IDs": videos_df['video_id'].nunique(),
+        "Total Videos": int(len(videos_df)),
+        "Videos Marked 'added_to_db'": int(videos_df['added_to_db'].astype(str).str.upper().eq('TRUE').sum()),
+        "Unique Video IDs": int(videos_df['video_id'].nunique()),
     }
-    stats["Videos Not Marked 'added_to_db'"] = stats["Total Videos"] - stats["Videos Marked 'added_to_db'"]
+    stats["Videos Not Marked 'added_to_db'"] = int(stats["Total Videos"] - stats["Videos Marked 'added_to_db'"])
 
     # Date-based stats
     if 'date' in videos_df.columns:
@@ -93,7 +93,7 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
             stats["Oldest Video Title"] = oldest.get('title', "N/A")
             stats["Oldest Video Date"] = oldest['date'].strftime("%Y-%m-%d %H:%M:%S")
             if len(valid_dates_df) > 1:
-                stats["Timespan of Videos (Days)"] = (valid_dates_df['date'].max() - valid_dates_df['date'].min()).days
+                stats["Timespan of Videos (Days)"] = int((valid_dates_df['date'].max() - valid_dates_df['date'].min()).days)
 
     # Game stats
     game_counts = pd.Series([game.strip() for games_str in videos_df['games'].dropna() for game in games_str.split(',')]).value_counts()
@@ -107,7 +107,7 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
     if not game_counts.empty:
         dashboard_list.append(("", ""))
         dashboard_list.append(("--- Game Statistics ---", ""))
-        dashboard_list.extend([(f"Videos for {game}", count) for game, count in game_counts.items()])
+        dashboard_list.extend([(f"Videos for {game}", int(count)) for game, count in game_counts.items()])
 
     return pd.DataFrame(dashboard_list, columns=["Statistic", "Value"])
 
