@@ -34,7 +34,8 @@ class GoogleSheetsClient:
         """Fetches a worksheet as a pandas DataFrame."""
         try:
             sheet = self.spreadsheet.worksheet(sheet_name)
-            df = get_as_dataframe(sheet, evaluate_formulas=True)
+            # Limit to columns A-G (0-6)
+            df = get_as_dataframe(sheet, evaluate_formulas=True, usecols=range(7))
             if df is not None and not df.empty:
                 df = df.dropna(how='all').reset_index(drop=True)
             return df
