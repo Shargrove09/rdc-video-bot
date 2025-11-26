@@ -194,10 +194,11 @@ def update_video_sheet(fetched_video_frame: pd.DataFrame):
         if not final_df.equals(current_df):
             client.write_dataframe_to_sheet(client.main_sheet.title, final_df)
             print(f"Found and added {len(new_videos_df)} new videos.")
+            update_dashboard_sheet(client, final_df.copy())
         else:
             print("No new unique videos found to add.")
 
-        update_dashboard_sheet(client, final_df.copy())
+        
 
     except (gspread.exceptions.SpreadsheetNotFound, gspread.exceptions.APIError) as e:
         print(f"A Google Sheets error occurred: {e}")

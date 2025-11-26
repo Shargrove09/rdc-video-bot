@@ -50,11 +50,11 @@ def setup_logging(log_dir="logs"):
     return logger
 
 # TODO: Update dashboard as well 
+# TODO: This is safe to delete? Check after fixing cronjob
 def standard_video_script(published_after_date_str: str):
     """
     Fetches YouTube videos from a playlist published after a specific date,
     filters them, and updates a Google Sheet.
-    This is a variation of main.testBedMain, focused on requiring a specific date.
 
     Args:
         published_after_date_str: The date string (YYYY-MM-DD) after which videos should be fetched.
@@ -212,7 +212,6 @@ def find_and_add_game_videos(game_name, published_after_str=DEFAULT_PUBLISHED_AF
     else:
         logger.info("User chose not to add the new videos. Exiting.")
 
-# TODO: Do we need this? find_and_add_game_videos is handles both fetching and adding new videos.
 def fetch_game_videos_from_playlist(game_name, published_after_str=DEFAULT_PUBLISHED_AFTER_DATE):
     """
     Fetches videos from a YouTube playlist for a specific game.
