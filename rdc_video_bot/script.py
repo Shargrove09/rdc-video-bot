@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
-from main import fetchVideosFromPlaylist, parse_videos, fuzzy_filter_videos
-from sheet import update_video_sheet, _get_current_sheet_data, _setup_google_sheets_connection, print_dataframe_info
-from config import YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, MAX_PAGES_TO_FETCH, VIDEO_FILTER, get_games, DEFAULT_PUBLISHED_AFTER_DATE
+from main import fetch_and_process_videos, parse_video_data, fuzzy_filter_videos, YouTubeClient
+from sheet import update_video_sheet, GoogleSheetsClient
+from config import YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, MAX_PAGES_TO_FETCH, VIDEO_FILTER, get_games, DEFAULT_PUBLISHED_AFTER_DATE, SPREADSHEET_NAME
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 import pandas as pd
@@ -49,6 +49,18 @@ def setup_logging(log_dir="logs"):
     logging.info(f"Logging initialized. Log file: {log_filename}")
     return logger
 
+def print_dataframe_info(df: pd.DataFrame, title: str = "DataFrame Info"):
+    """Helper function to print basic dataframe information."""
+    if df is None or df.empty:
+        print(f"\n{title}: DataFrame is empty or None")
+        return
+    print(f"\n{title}:")
+    print(f"  Total rows: {len(df)}")
+    if 'video_id' in df.columns:
+        print(f"  Unique video IDs: {df['video_id'].nunique()}")
+    if 'date' in df.columns:
+        print(f"  Date range: {df['date'].min()} to {df['date'].max()}")
+
 # TODO: Update dashboard as well 
 # TODO: This is safe to delete? Check after fixing cronjob
 def standard_video_script(published_after_date_str: str):
@@ -68,62 +80,25 @@ def standard_video_script(published_after_date_str: str):
         return
 
     try:
-        youtube = googleapiclient.discovery.build(
-            YOUTUBE_API_SERVICE_NAME,
-            YOUTUBE_API_VERSION,
-            developerKey=api_key
-        )
+        youtube = YouTubeClient(api_key)
     except Exception as e:
         logger.error(f"Error building YouTube client: {e}")
         return
 
-    video_data = []
-    current_page_token = None
-    processed_videos_set = set()
-    pages_fetched = 0
-
     logger.info(f"Starting video fetch for standard_video_script, for videos published after: {published_after_date_str}")
 
-    while pages_fetched < MAX_PAGES_TO_FETCH:
-        logger.info(f"Fetching page {pages_fetched + 1} with token: {current_page_token if current_page_token else 'None'}")
-        
-        fetch_result = fetchVideosFromPlaylist(
-            youtube,
-            pageToken=current_page_token,
-            proccessed_videos=processed_videos_set,
-            published_after_str=published_after_date_str  # Use the function parameter here
-        )
+    # fetch_and_process_videos now handles pagination internally and returns a list of raw video items
+    raw_videos = fetch_and_process_videos(
+        youtube,
+        published_after_str=published_after_date_str
+    )
 
-        if not fetch_result:
-            logger.warning("fetchVideosFromPlaylist returned no result. Stopping.")
-            break
-        
-        items_on_page = fetch_result.get('items')
-        if items_on_page:
-            parse_videos(fetch_result, video_data)
-        else:
-            # This can happen if the date filter stops fetching early on a page, or API error.
-            # fetchVideosFromPlaylist prints errors for HttpError.
-            logger.warning("No items found on this page or an error occurred in fetchVideosFromPlaylist.")
-
-        processed_videos_set = fetch_result.get('processed_videos_set', processed_videos_set)
-        current_page_token = fetch_result.get('nextPageToken')
-        pages_fetched += 1
-
-        if not current_page_token:
-            logger.info("No more pages to fetch (end of playlist or date filter met).")
-            break
-
-        if pages_fetched >= MAX_PAGES_TO_FETCH:
-            logger.info(f"Reached max page fetch limit of {MAX_PAGES_TO_FETCH}.")
-            break
-
-    if not video_data:
+    if not raw_videos:
         logger.info("No videos fetched. Exiting standard_video_script.")
         return
 
-    video_data.sort(key=lambda x: x['date'], reverse=True)
-    df = pd.DataFrame(video_data)
+    # Parse the raw video data into a DataFrame
+    df = parse_video_data(raw_videos)
 
     if df.empty:
         logger.info("DataFrame is empty after fetching and parsing. No videos to process.")
@@ -176,8 +151,10 @@ def find_and_add_game_videos(game_name, published_after_str=DEFAULT_PUBLISHED_AF
     fetched_df = pd.DataFrame(fetched_videos_list)
 
     try:
-        gc, current_sheet = _setup_google_sheets_connection()
-        current_df = _get_current_sheet_data(current_sheet)
+        client = GoogleSheetsClient(SPREADSHEET_NAME)
+        current_df = client.get_sheet_as_dataframe(client.main_sheet.title)
+        if current_df is None:
+            current_df = pd.DataFrame()
     except Exception as e:
         logger.error(f"Error connecting to Google Sheets: {e}")
         return
@@ -226,13 +203,6 @@ def fetch_game_videos_from_playlist(game_name, published_after_str=DEFAULT_PUBLI
     logger = setup_logging()
     logger.info(f"Fetching videos for game: {game_name} published after {published_after_str}")
     
-    # This function would be similar to standard_video_script but focused on a specific game
-    # Implementation details would depend on how the game is identified in the playlist
-    # For now, we will just call standard_video_script with the same date filter
-    video_data = []
-    current_page_token = None
-    processed_videos_set = set()
-    pages_fetched = 0
     api_key = os.getenv("API_KEY")
 
     if game_name not in VIDEO_FILTER:
@@ -251,11 +221,7 @@ def fetch_game_videos_from_playlist(game_name, published_after_str=DEFAULT_PUBLI
             logger.warning(f"Invalid date format '{user_date}'. Using default date: {published_after_str}")
    
     try:
-        youtube = googleapiclient.discovery.build(
-            YOUTUBE_API_SERVICE_NAME,
-            YOUTUBE_API_VERSION,
-            developerKey=api_key
-        )
+        youtube = YouTubeClient(api_key)
     except Exception as e:
         logger.error(f"Error building YouTube client: {e}")
         return []
@@ -263,43 +229,18 @@ def fetch_game_videos_from_playlist(game_name, published_after_str=DEFAULT_PUBLI
     keywords = VIDEO_FILTER[game_name]
     logger.info(f"Using keywords for filtering: {keywords}")
 
-    while pages_fetched < MAX_PAGES_TO_FETCH:
-        fetch_result = fetchVideosFromPlaylist(
-            youtube,
-            pageToken=current_page_token,
-            proccessed_videos=processed_videos_set,
-            published_after_str=published_after_str
-        )
+    # fetch_and_process_videos now handles pagination internally and returns a list of raw video items
+    raw_videos = fetch_and_process_videos(
+        youtube,
+        published_after_str=published_after_str
+    )
 
-        if not fetch_result:
-            logger.warning("fetchVideosFromPlaylist returned no result. Stopping.")
-            break
-
-        items_on_page = fetch_result.get('items')
-        if items_on_page:
-            parse_videos(fetch_result, video_data)
-        else:
-            logger.warning("No items found on this page or an error occurred in fetchVideosFromPlaylist.")
-
-        processed_videos_set = fetch_result.get('processed_videos_set', processed_videos_set)
-        current_page_token = fetch_result.get('nextPageToken')
-        pages_fetched += 1
-
-        if not current_page_token:
-            logger.info("No more pages to fetch.")
-            break
-
-        if pages_fetched >= MAX_PAGES_TO_FETCH:
-            logger.info("Reached max pages to fetch.")
-            break
-
-
-    if not video_data:
+    if not raw_videos:
         logger.info("No video data was parsed.")
         return []
 
-    video_data.sort(key=lambda x: x['date'], reverse=True)
-    df = pd.DataFrame(video_data)
+    # Parse the raw video data into a DataFrame
+    df = parse_video_data(raw_videos)
 
     if df.empty:
         logger.info("DataFrame is empty after fetching and parsing. No videos to process.")

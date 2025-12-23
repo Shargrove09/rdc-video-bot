@@ -348,7 +348,7 @@ def interactive_menu(youtube_client: YouTubeClient):
         print(f"\n{Fore.CYAN}--- RDC Video Bot Menu ---{Style.RESET_ALL}")
         print("1. Fetch and update videos (default)")
         print("2. Fetch stats from dashboard")
-        print("3. Fetch videos from a specific date")
+        print("3. Fetch videos from a specific date onwards")
         print("4. Show latest videos from sheet")
         print("5. Search videos by game from playlist")
         print(f"{Fore.RED}6. Exit{Style.RESET_ALL}")
