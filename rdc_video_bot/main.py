@@ -141,7 +141,8 @@ def parse_video_data(videos: List[Dict[str, Any]]) -> pd.DataFrame:
             "video_id": f"https://www.youtube.com/watch?v={video_id}",
             "date": date_obj.strftime("%Y-%m-%d %H:%M:%S"),
             "added_to_db": False,
-            "date_added_to_db": None
+            "date_added_to_db": None,
+            "has_screenshots": False
         })
     return pd.DataFrame(video_data_list)
 

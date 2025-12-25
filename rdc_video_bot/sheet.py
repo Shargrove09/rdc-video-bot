@@ -34,8 +34,8 @@ class GoogleSheetsClient:
         """Fetches a worksheet as a pandas DataFrame."""
         try:
             sheet = self.spreadsheet.worksheet(sheet_name)
-            # Limit to columns A-G (0-6)
-            df = get_as_dataframe(sheet, evaluate_formulas=True, usecols=range(7))
+            # Limit to columns A-H (0-7) to include has_screenshots
+            df = get_as_dataframe(sheet, evaluate_formulas=True, usecols=range(8))
             if df is not None and not df.empty:
                 df = df.dropna(how='all').reset_index(drop=True)
             return df
@@ -82,6 +82,11 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
         "Unique Video IDs": int(videos_df['video_id'].nunique()),
     }
     stats["Videos Not Marked 'added_to_db'"] = int(stats["Total Videos"] - stats["Videos Marked 'added_to_db'"])
+    
+    # Add has_screenshots statistics if column exists
+    if 'has_screenshots' in videos_df.columns:
+        stats["Videos with Screenshots"] = int(videos_df['has_screenshots'].astype(str).str.upper().eq('TRUE').sum())
+        stats["Videos without Screenshots"] = int(stats["Total Videos"] - stats["Videos with Screenshots"])
 
     # Date-based stats
     if 'date' in videos_df.columns:
@@ -127,13 +132,17 @@ def update_dashboard_sheet(client: GoogleSheetsClient, videos_df: pd.DataFrame):
 # --- Main Video Sheet Update Logic ---
 
 def _normalize_dataframe_columns(df: pd.DataFrame, df_name: str = "DataFrame") -> pd.DataFrame:
-    """Normalizes 'added_to_db' and 'date' columns."""
+    """Normalizes 'added_to_db', 'has_screenshots' and 'date' columns."""
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df
 
     if 'added_to_db' not in df.columns:
         df['added_to_db'] = False
     df['added_to_db'] = df['added_to_db'].astype(str).str.upper().map({'TRUE': True, 'FALSE': False}).fillna(False)
+
+    if 'has_screenshots' not in df.columns:
+        df['has_screenshots'] = False
+    df['has_screenshots'] = df['has_screenshots'].astype(str).str.upper().map({'TRUE': True, 'FALSE': False}).fillna(False)
 
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
@@ -167,6 +176,9 @@ def _finalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     df['added_to_db'] = df['added_to_db'].map({True: 'TRUE', False: 'FALSE'}).fillna('FALSE')
+    
+    if 'has_screenshots' in df.columns:
+        df['has_screenshots'] = df['has_screenshots'].map({True: 'TRUE', False: 'FALSE'}).fillna('FALSE')
 
     if 'date' in df.columns:
         df = df.sort_values(by='date', ascending=False, na_position='last').reset_index(drop=True)
