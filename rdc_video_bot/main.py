@@ -17,7 +17,7 @@ from sheet import update_video_sheet, fetch_dashboard_stats, fetch_latest_videos
 from config import (
     VIDEO_FILTER, YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
     YOUTUBE_PLAYLIST_ID, MAX_PAGES_TO_FETCH, DEFAULT_PUBLISHED_AFTER_DATE,
-    get_games
+    get_games, VIDEO_COLUMNS
 )
 
 # --- YouTube Client Class ---
@@ -136,14 +136,17 @@ def parse_video_data(videos: List[Dict[str, Any]]) -> pd.DataFrame:
         date_str = video['contentDetails']['videoPublishedAt']
         date_obj = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
 
-        video_data_list.append({
+        # Initialize all columns from centralized schema with None defaults
+        video_dict = {col: None for col in VIDEO_COLUMNS}
+        # Populate known values
+        video_dict.update({
             "title": title,
             "video_id": f"https://www.youtube.com/watch?v={video_id}",
             "date": date_obj.strftime("%Y-%m-%d %H:%M:%S"),
             "added_to_db": False,
-            "date_added_to_db": None,
             "has_screenshots": False
         })
+        video_data_list.append(video_dict)
     return pd.DataFrame(video_data_list)
 
 def fuzzy_filter_videos(videos_df: pd.DataFrame, threshold: int = 80) -> pd.DataFrame:

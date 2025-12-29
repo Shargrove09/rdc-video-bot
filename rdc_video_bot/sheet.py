@@ -5,7 +5,7 @@ from datetime import datetime
 import traceback
 from typing import Optional, Tuple, Dict, Any, List
 
-from config import SPREADSHEET_NAME
+from config import SPREADSHEET_NAME, NUM_COLUMNS
 
 # --- Google Sheets Client Class ---
 
@@ -34,8 +34,8 @@ class GoogleSheetsClient:
         """Fetches a worksheet as a pandas DataFrame."""
         try:
             sheet = self.spreadsheet.worksheet(sheet_name)
-            # Limit to columns A-H (0-7) to include has_screenshots
-            df = get_as_dataframe(sheet, evaluate_formulas=True, usecols=range(8))
+            # Read columns based on centralized schema from config.VIDEO_COLUMNS
+            df = get_as_dataframe(sheet, evaluate_formulas=True, usecols=range(NUM_COLUMNS))
             if df is not None and not df.empty:
                 df = df.dropna(how='all').reset_index(drop=True)
             return df
@@ -147,6 +147,9 @@ def _normalize_dataframe_columns(df: pd.DataFrame, df_name: str = "DataFrame") -
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
     
+    if 'date_screenshotted' in df.columns:
+        df['date_screenshotted'] = pd.to_datetime(df['date_screenshotted'], errors='coerce')
+    
     return df
 
 def _merge_video_dataframes(current_df: pd.DataFrame, fetched_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -174,6 +177,11 @@ def _finalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Sorts and formats the DataFrame for writing to the sheet."""
     if df.empty:
         return df
+
+    # Auto-populate date_screenshotted when has_screenshots is TRUE but date is missing
+    if 'has_screenshots' in df.columns and 'date_screenshotted' in df.columns:
+        mask = (df['has_screenshots'] == True) & (df['date_screenshotted'].isna())
+        df.loc[mask, 'date_screenshotted'] = datetime.now()
 
     df['added_to_db'] = df['added_to_db'].map({True: 'TRUE', False: 'FALSE'}).fillna('FALSE')
     

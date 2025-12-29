@@ -30,4 +30,22 @@ def get_games() -> list:
     """Returns a list of all configured game categories from the loaded filter."""
     return list(VIDEO_FILTER.keys())
 
+# --- Column Schema Configuration ---
+# Centralized definition of all columns used in the video tracking system
+# Order matters - this determines the column order in the spreadsheet
+
+VIDEO_COLUMNS = [
+    "title",
+    "video_id",
+    "date",
+    "added_to_db",
+    "date_added_to_db",
+    "has_screenshots",
+    "date_screenshotted",
+    "games",
+    "Day Winner(s)"
+]
+
+# Number of columns to read from the sheet (automatically calculated)
+NUM_COLUMNS = len(VIDEO_COLUMNS)
 
