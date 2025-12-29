@@ -3,9 +3,9 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import pandas as pd
 from datetime import datetime
 import traceback
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple
 
-from config import SPREADSHEET_NAME, NUM_COLUMNS
+from config import SPREADSHEET_NAME,  VIDEO_COLUMNS
 
 # --- Google Sheets Client Class ---
 
@@ -34,9 +34,11 @@ class GoogleSheetsClient:
         """Fetches a worksheet as a pandas DataFrame."""
         try:
             sheet = self.spreadsheet.worksheet(sheet_name)
-            # Read columns based on centralized schema from config.VIDEO_COLUMNS
-            df = get_as_dataframe(sheet, evaluate_formulas=True, usecols=range(NUM_COLUMNS))
+            # Read all columns - missing columns will be added automatically during merge
+            df = get_as_dataframe(sheet, evaluate_formulas=True)
             if df is not None and not df.empty:
+                # Filter out unnamed columns before processing
+                df = df.loc[:, ~df.columns.str.contains('^Unnamed', na=False)]
                 df = df.dropna(how='all').reset_index(drop=True)
             return df
         except gspread.exceptions.WorksheetNotFound:
@@ -160,6 +162,13 @@ def _merge_video_dataframes(current_df: pd.DataFrame, fetched_df: pd.DataFrame) 
     if current_df.empty:
         return fetched_df.copy(), fetched_df.copy()
 
+    # Ensure all columns from VIDEO_COLUMNS exist in both dataframes
+    for col in VIDEO_COLUMNS:
+        if col not in current_df.columns:
+            current_df[col] = None
+        if col not in fetched_df.columns:
+            fetched_df[col] = None
+
     # Ensure video_id types are consistent
     current_df['video_id'] = current_df['video_id'].astype(str)
     fetched_df['video_id'] = fetched_df['video_id'].astype(str)
@@ -167,6 +176,17 @@ def _merge_video_dataframes(current_df: pd.DataFrame, fetched_df: pd.DataFrame) 
     new_videos_df = fetched_df[~fetched_df['video_id'].isin(current_df['video_id'])].copy()
     
     if not new_videos_df.empty:
+        # Get the column order from current_df to preserve it
+        column_order = [col for col in current_df.columns if col in VIDEO_COLUMNS]
+        # Add any new columns from VIDEO_COLUMNS that aren't in current_df
+        for col in VIDEO_COLUMNS:
+            if col not in column_order:
+                column_order.append(col)
+        
+        # Reorder both dataframes to match before concatenating
+        current_df = current_df[column_order]
+        new_videos_df = new_videos_df[column_order]
+        
         updated_df = pd.concat([current_df, new_videos_df], ignore_index=True)
     else:
         updated_df = current_df.copy()
