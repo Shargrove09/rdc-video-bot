@@ -1,11 +1,15 @@
+import logging
+import os
 import gspread
 from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import pandas as pd
 from datetime import datetime
-import traceback
 from typing import Optional, Tuple
 
-from config import SPREADSHEET_NAME,  VIDEO_COLUMNS
+from rdc_video_bot.config import SPREADSHEET_NAME, VIDEO_COLUMNS
+
+logger = logging.getLogger(__name__)
+
 
 # --- Google Sheets Client Class ---
 
@@ -19,32 +23,34 @@ class GoogleSheetsClient:
             spreadsheet_name: The name of the Google Sheet.
         """
         try:
-            self.gc = gspread.service_account()
+            creds_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            if creds_path:
+                self.gc = gspread.service_account(filename=creds_path)
+            else:
+                self.gc = gspread.service_account()
             self.spreadsheet = self.gc.open(spreadsheet_name)
             self.main_sheet = self.spreadsheet.sheet1
-            print(f"--- Connected to Sheet: '{self.main_sheet.title}' in '{spreadsheet_name}' ---")
+            logger.info(f"Connected to Sheet: '{self.main_sheet.title}' in '{spreadsheet_name}'")
         except gspread.exceptions.SpreadsheetNotFound:
-            print(f"Error: Spreadsheet '{spreadsheet_name}' not found.")
+            logger.error(f"Spreadsheet '{spreadsheet_name}' not found.")
             raise
         except Exception as e:
-            print(f"An unexpected error occurred during Google Sheets client initialization: {e}")
+            logger.error(f"Unexpected error during Google Sheets client initialization: {e}")
             raise
 
     def get_sheet_as_dataframe(self, sheet_name: str) -> Optional[pd.DataFrame]:
         """Fetches a worksheet as a pandas DataFrame."""
         try:
             sheet = self.spreadsheet.worksheet(sheet_name)
-            # Read all columns - missing columns will be added automatically during merge
             df = get_as_dataframe(sheet, evaluate_formulas=True)
             if df is not None and not df.empty:
-                # Filter out unnamed columns before processing
                 df = df.loc[:, ~df.columns.str.contains('^Unnamed', na=False)]
                 df = df.dropna(how='all').reset_index(drop=True)
             return df
         except gspread.exceptions.WorksheetNotFound:
             return None
         except Exception as e:
-            print(f"Error fetching sheet '{sheet_name}': {e}")
+            logger.error(f"Error fetching sheet '{sheet_name}': {e}")
             return None
 
     def write_dataframe_to_sheet(self, sheet_name: str, df: pd.DataFrame):
@@ -53,23 +59,24 @@ class GoogleSheetsClient:
             sheet = self.spreadsheet.worksheet(sheet_name)
             sheet.clear()
             set_with_dataframe(sheet, df, include_index=False, resize=True)
-            print(f"Sheet '{sheet_name}' updated successfully.")
+            logger.info(f"Sheet '{sheet_name}' updated successfully.")
         except gspread.exceptions.WorksheetNotFound:
-            print(f"Cannot write to sheet '{sheet_name}': Not found.")
+            logger.warning(f"Cannot write to sheet '{sheet_name}': Not found.")
         except Exception as e:
-            print(f"Error writing to sheet '{sheet_name}': {e}")
+            logger.error(f"Error writing to sheet '{sheet_name}': {e}")
 
     def create_sheet(self, sheet_name: str) -> Optional[gspread.Worksheet]:
         """Creates a new worksheet if it doesn't exist."""
         try:
             sheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=20, cols=2)
-            print(f"Created new sheet: '{sheet_name}'")
+            logger.info(f"Created new sheet: '{sheet_name}'")
             return sheet
         except gspread.exceptions.APIError as e:
             if 'already exists' in str(e):
                 return self.spreadsheet.worksheet(sheet_name)
-            print(f"API Error creating sheet '{sheet_name}': {e}")
+            logger.error(f"API Error creating sheet '{sheet_name}': {e}")
             return None
+
 
 # --- Dashboard Statistics Logic ---
 
@@ -84,13 +91,11 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
         "Unique Video IDs": int(videos_df['video_id'].nunique()),
     }
     stats["Videos Not Marked 'added_to_db'"] = int(stats["Total Videos"] - stats["Videos Marked 'added_to_db'"])
-    
-    # Add has_screenshots statistics if column exists
+
     if 'has_screenshots' in videos_df.columns:
         stats["Videos with Screenshots"] = int(videos_df['has_screenshots'].astype(str).str.upper().eq('TRUE').sum())
         stats["Videos without Screenshots"] = int(stats["Total Videos"] - stats["Videos with Screenshots"])
 
-    # Date-based stats
     if 'date' in videos_df.columns:
         valid_dates_df = videos_df.dropna(subset=['date']).sort_values(by='date', ascending=False)
         if not valid_dates_df.empty:
@@ -103,15 +108,13 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
             if len(valid_dates_df) > 1:
                 stats["Timespan of Videos (Days)"] = int((valid_dates_df['date'].max() - valid_dates_df['date'].min()).days)
 
-    # Game stats
     game_counts = pd.Series([game.strip() for games_str in videos_df['games'].dropna() for game in games_str.split(',')]).value_counts()
 
-    # Format for display
     dashboard_list = [("--- General Information ---", ""),
                       ("Last Dashboard Update", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
                       ("", ""), ("--- Video Statistics ---", "")]
     dashboard_list.extend(stats.items())
-    
+
     if not game_counts.empty:
         dashboard_list.append(("", ""))
         dashboard_list.append(("--- Game Statistics ---", ""))
@@ -119,17 +122,19 @@ def _calculate_dashboard_stats(videos_df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(dashboard_list, columns=["Statistic", "Value"])
 
+
 def update_dashboard_sheet(client: GoogleSheetsClient, videos_df: pd.DataFrame):
     """Updates the 'Dashboard' sheet with statistics."""
-    print("Updating dashboard sheet...")
+    logger.info("Updating dashboard sheet...")
     dashboard_df = _calculate_dashboard_stats(videos_df)
-    
+
     dashboard_sheet = client.spreadsheet.worksheet("Dashboard")
     if not dashboard_sheet:
         dashboard_sheet = client.create_sheet("Dashboard")
 
     if dashboard_sheet:
         client.write_dataframe_to_sheet("Dashboard", dashboard_df)
+
 
 # --- Main Video Sheet Update Logic ---
 
@@ -148,11 +153,12 @@ def _normalize_dataframe_columns(df: pd.DataFrame, df_name: str = "DataFrame") -
 
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    
+
     if 'date_screenshotted' in df.columns:
         df['date_screenshotted'] = pd.to_datetime(df['date_screenshotted'], errors='coerce')
-    
+
     return df
+
 
 def _merge_video_dataframes(current_df: pd.DataFrame, fetched_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Merges current and fetched data, identifying new videos."""
@@ -162,136 +168,112 @@ def _merge_video_dataframes(current_df: pd.DataFrame, fetched_df: pd.DataFrame) 
     if current_df.empty:
         return fetched_df.copy(), fetched_df.copy()
 
-    # Ensure all columns from VIDEO_COLUMNS exist in both dataframes
     for col in VIDEO_COLUMNS:
         if col not in current_df.columns:
             current_df[col] = None
         if col not in fetched_df.columns:
             fetched_df[col] = None
 
-    # Ensure video_id types are consistent
     current_df['video_id'] = current_df['video_id'].astype(str)
     fetched_df['video_id'] = fetched_df['video_id'].astype(str)
 
     new_videos_df = fetched_df[~fetched_df['video_id'].isin(current_df['video_id'])].copy()
-    
+
     if not new_videos_df.empty:
-        # Get the column order from current_df to preserve it
         column_order = [col for col in current_df.columns if col in VIDEO_COLUMNS]
-        # Add any new columns from VIDEO_COLUMNS that aren't in current_df
         for col in VIDEO_COLUMNS:
             if col not in column_order:
                 column_order.append(col)
-        
-        # Reorder both dataframes to match before concatenating
+
         current_df = current_df[column_order]
         new_videos_df = new_videos_df[column_order]
-        
+
         updated_df = pd.concat([current_df, new_videos_df], ignore_index=True)
     else:
         updated_df = current_df.copy()
-        
+
     return updated_df, new_videos_df
+
 
 def _finalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Sorts and formats the DataFrame for writing to the sheet."""
     if df.empty:
         return df
 
-    # Auto-populate date_screenshotted when has_screenshots is TRUE but date is missing
     if 'has_screenshots' in df.columns and 'date_screenshotted' in df.columns:
         mask = (df['has_screenshots'] == True) & (df['date_screenshotted'].isna())
         df.loc[mask, 'date_screenshotted'] = datetime.now()
 
     df['added_to_db'] = df['added_to_db'].map({True: 'TRUE', False: 'FALSE'}).fillna('FALSE')
-    
+
     if 'has_screenshots' in df.columns:
         df['has_screenshots'] = df['has_screenshots'].map({True: 'TRUE', False: 'FALSE'}).fillna('FALSE')
 
     if 'date' in df.columns:
         df = df.sort_values(by='date', ascending=False, na_position='last').reset_index(drop=True)
-        
+
     return df
 
+
 def update_video_sheet(fetched_video_frame: pd.DataFrame):
-    """
-    Updates the main video sheet with new videos.
-    Args:
-        fetched_video_frame: DataFrame with newly fetched videos.
-    """
+    """Updates the main video sheet with new videos."""
     try:
         client = GoogleSheetsClient(SPREADSHEET_NAME)
 
         current_df_raw = client.get_sheet_as_dataframe(client.main_sheet.title)
         current_df = _normalize_dataframe_columns(current_df_raw, "Current Sheet Data")
-        
+
         fetched_df = _normalize_dataframe_columns(fetched_video_frame.copy(), "Fetched Video Data")
-        
+
         updated_df, new_videos_df = _merge_video_dataframes(current_df, fetched_df)
-        
+
         final_df = _finalize_dataframe(updated_df)
-        
+
         if not final_df.equals(current_df):
             client.write_dataframe_to_sheet(client.main_sheet.title, final_df)
-            print(f"Found and added {len(new_videos_df)} new videos.")
+            logger.info(f"Found and added {len(new_videos_df)} new videos.")
             update_dashboard_sheet(client, final_df.copy())
         else:
-            print("No new unique videos found to add.")
-
-        
+            logger.info("No new unique videos found to add.")
 
     except (gspread.exceptions.SpreadsheetNotFound, gspread.exceptions.APIError) as e:
-        print(f"A Google Sheets error occurred: {e}")
+        logger.error(f"A Google Sheets error occurred: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred in update_video_sheet: {e}")
-        print(traceback.format_exc())
+        logger.error(f"Unexpected error in update_video_sheet: {e}", exc_info=True)
+
 
 def fetch_dashboard_stats() -> Optional[pd.DataFrame]:
     """Fetches and returns the dashboard statistics as a DataFrame."""
     try:
         client = GoogleSheetsClient(SPREADSHEET_NAME)
         dashboard_df = client.get_sheet_as_dataframe("Dashboard")
-        
+
         if dashboard_df is None:
-            print("Dashboard sheet not found. Run option 1 to create it.")
+            logger.warning("Dashboard sheet not found. Run option 1 to create it.")
             return None
         if dashboard_df.empty:
-            print("Dashboard is empty.")
+            logger.info("Dashboard is empty.")
             return pd.DataFrame()
-            
+
         return dashboard_df
     except Exception as e:
-        print(f"Failed to fetch dashboard stats: {e}")
+        logger.error(f"Failed to fetch dashboard stats: {e}")
         return None
 
+
 def fetch_latest_videos(limit: int = 10) -> Optional[pd.DataFrame]:
-    """
-    Fetches the latest 'limit' rows from the main video sheet.
-    Args:
-        limit: The number of rows to fetch.
-    Returns:
-        A DataFrame containing the latest videos.
-    """
+    """Fetches the latest 'limit' rows from the main video sheet."""
     try:
         client = GoogleSheetsClient(SPREADSHEET_NAME)
         df = client.get_sheet_as_dataframe(client.main_sheet.title)
-        
+
         if df is None or df.empty:
-            print("Main sheet is empty.")
+            logger.info("Main sheet is empty.")
             return None
-            
-        # Filter out unnamed columns
+
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
 
-        # Assuming the sheet is sorted by date descending, return the top 'limit' rows
         return df.head(limit)
     except Exception as e:
-        print(f"Failed to fetch latest videos: {e}")
+        logger.error(f"Failed to fetch latest videos: {e}")
         return None
-
-if __name__ == "__main__":
-    # Example usage for testing purposes
-    # You would need to create a sample DataFrame to test update_video_sheet
-    pass
-
-

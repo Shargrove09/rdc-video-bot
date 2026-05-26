@@ -1,0 +1,13 @@
+[Unit]
+Description=RDC Video Bot - YouTube to Google Sheets sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=rdc-bot
+WorkingDirectory=/opt/rdc-video-bot
+ExecStart=/opt/rdc-video-bot/.venv/bin/python -m rdc_video_bot.script
+EnvironmentFile=/etc/rdc-video-bot/env
+StandardOutput=journal
+StandardError=journal

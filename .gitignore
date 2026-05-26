@@ -4,3 +4,5 @@ client_secret_google.json
 /rdc_video_bot/*.pyc
 /logs/
 task_log.txt
+
+CLAUDE.md
